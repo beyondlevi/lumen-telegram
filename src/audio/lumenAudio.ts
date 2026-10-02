@@ -5,6 +5,14 @@
 
 export const RECORD_LIMIT_MS = 120000;
 
+/** Normal speech reaches only 0.15–0.3 of the host's level scale. */
+const METER_GAIN = 3;
+
+/** The host's input level (0..1) scaled for the level meter. */
+export function meterLevel(level: number): number {
+  return Math.min(1, Math.max(0, level * METER_GAIN));
+}
+
 export type LumenAudioErrorCode =
   | 'busy'
   | 'no-phone'

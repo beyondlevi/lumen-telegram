@@ -4,9 +4,12 @@
 import voiceNote from '../demo/assets/voice-note.ogg';
 import {RECORD_LIMIT_MS, type LumenAudio, type LumenAudioError, type LumenAudioResult, type LumenRecording} from './lumenAudio';
 
+// Timings like the glasses: the microphone starts in 0.5–2 s, the file arrives
+// a few seconds after stop() and transcription takes about the audio's length.
 const LEVEL_INTERVAL_MS = 200;
-const START_DELAY_MS = 300;
-const WORD_INTERVAL_MS = 150;
+const START_DELAY_MS = 1000;
+const FINISH_DELAY_MS = 2000;
+const WORD_INTERVAL_MS = 250;
 
 export const DEMO_TRANSCRIPT =
   "Morning! Quick update: I'm on my way and should be there in about ten minutes. Save me a seat, see you soon.";
@@ -21,11 +24,10 @@ async function demoBlob(): Promise<Blob> {
   return new Blob([await response.arrayBuffer()], {type: 'audio/ogg'});
 }
 
-/** A speech-like level between 0 and 1 for time t (ms). */
+/** A speech-like level for time t (ms): 0.15–0.3 in phrases, 0 in the pauses between them, like the host. */
 export function demoLevel(t: number): number {
-  const syllables = Math.abs(Math.sin(t / 130)) * 0.55;
-  const phrases = Math.max(0, Math.sin(t / 900)) * 0.4;
-  return Math.min(1, 0.05 + syllables * (0.4 + phrases));
+  const phrase = Math.sin(t / 900 + 0.6);
+  return phrase > -0.3 ? 0.15 + 0.15 * Math.abs(Math.sin(t / 130)) : 0;
 }
 
 export function createDemoAudio(): LumenAudio {
@@ -46,10 +48,10 @@ export function createDemoAudio(): LumenAudio {
         active = false;
         clearInterval(timer);
       };
-      const result = async (): Promise<LumenAudioResult> => ({
+      const result = async (durationMs: number): Promise<LumenAudioResult> => ({
         blob: await demoBlob(),
         mimeType: 'audio/ogg; codecs=opus',
-        durationMs: Math.min(Date.now() - startedAt, maxMs),
+        durationMs: Math.min(durationMs, maxMs),
       });
       const recording: LumenRecording = {
         onLevel: null,
@@ -58,8 +60,10 @@ export function createDemoAudio(): LumenAudio {
           if (done) {
             throw audioError('cancelled', 'The recording already ended');
           }
+          const durationMs = Date.now() - startedAt;
           finish();
-          return result();
+          await new Promise(resolve => setTimeout(resolve, FINISH_DELAY_MS));
+          return result(durationMs);
         },
         cancel() {
           finish();
@@ -69,7 +73,7 @@ export function createDemoAudio(): LumenAudio {
         const elapsed = Date.now() - startedAt;
         if (elapsed >= maxMs) {
           finish();
-          void result().then(audio => recording.onEnd?.('max', audio));
+          void result(elapsed).then(audio => recording.onEnd?.('max', audio));
           return;
         }
         recording.onLevel?.(demoLevel(elapsed), elapsed);

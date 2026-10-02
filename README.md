@@ -268,7 +268,13 @@ interface LumenRecording {
 - **Recording screen** (`/chat/:id/record`, its own history entry):
   - shows the elapsed time, a microphone level bar (from `onLevel`) and **Send** (initial focus) /
     **Discard**;
-  - Send stops and sends; Discard or Back cancels without sending;
+  - "Starting…" with a spinner until `record()` resolves (the phone confirms the microphone in about
+    0.5–2 s); Send keeps the focus but does nothing yet;
+  - the level bar shows `min(1, level × 3)`: the host's level is 0..1, normal speech gives 0.15–0.3 and
+    silence 0;
+  - Send stops, shows "Finishing…" with a spinner and Send disabled until `stop()` resolves (on the
+    glasses the file arrives about 4 s later, encoded and sent over in parts), then sends;
+  - Discard or Back cancels without sending, also while finishing;
   - at 2:00 the host ends the recording (`onEnd('max', result)`), and the screen says so and keeps
     Send / Discard;
   - while sending, a spinner; then the Toast "Voice message sent", and the conversation shows the note,
@@ -282,7 +288,9 @@ interface LumenRecording {
   - errors (busy, no-phone, too-large, no-speech, engine, …) have their own message and **Try again**;
   - Back aborts a running transcription (`signal`).
 - **Demo mode** uses a simulated `window.lumen.audio` (`src/audio/demoAudio.ts`):
-  - an animated level while recording, and the packaged demo voice note as the recording;
+  - timings like the glasses: the microphone starts after 1 s, the audio arrives 2 s after Send, and the
+    transcript takes about as long as the 6 s note;
+  - a speech-like level (0.15–0.3, 0 between phrases), and the packaged demo voice note as the recording;
   - a fixed English transcript delivered word by word;
   - no microphone, no network, no storage.
 
@@ -350,6 +358,8 @@ uploads the `.mrbd.zip` and the screenshots. A separate job runs the live check 
 Voice notes and transcription (`tests/e2e/fakeAudio.mjs` injects a scripted `window.lumen.audio`, in
 Chromium and Firefox):
 - recording, Send, Discard, Back and the 2-minute limit (`maxMs: 120000`, `onEnd('max')`);
+- a host as slow as the glasses (start 1.5 s, file 2 s after `stop()`): "Starting…", "Finishing…" with
+  Send disabled and focused, Enter ignored while finishing, Back while finishing sends nothing;
 - the voice note sent with its length and 100-sample waveform (checked on the scripted Telegram); a unit test runs the real GramJS `sendFile` with the network replaced and checks the upload and the `documentAttributeAudio`;
 - the `busy` and `no-phone` errors and Try again;
 - the voice menu (Listen, Pause, Transcribe);

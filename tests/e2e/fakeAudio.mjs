@@ -5,6 +5,8 @@
 //
 // __audioControl:
 //   recordError   'busy' | 'no-phone' | … : the next record() rejects with that code
+//   startDelayMs  number: record() resolves after that time (the phone confirming the microphone)
+//   stopDelayMs   number: stop() resolves after that time (encoding and transfer of the file)
 //   endAfterMs    number: the recording ends by itself ('max') after that time
 //   transcribeError 'engine' | 'no-speech' | … : the next transcribe() rejects
 //   transcript    text returned by transcribe(), delivered word by word as partials
@@ -15,10 +17,11 @@ export function fakeAudioScript(voiceUrl) {
   return `
     (() => {
       const voiceUrl = ${JSON.stringify(voiceUrl)};
-      const control = (window.__audioControl = {recordError: null, endAfterMs: null, transcribeError: null,
+      const control = (window.__audioControl = {recordError: null, startDelayMs: 0, stopDelayMs: 0, endAfterMs: null, transcribeError: null,
         transcript: 'This is a fake transcript of the voice message.'});
       const log = (window.__audioLog = {records: [], stops: 0, cancels: 0, transcribes: 0, partials: 0});
       const failure = (code, message) => Object.assign(new Error(message || code), {code});
+      const delay = ms => new Promise(resolve => setTimeout(resolve, ms || 0));
       const recordingBlob = async () => new Blob([await (await fetch(voiceUrl)).arrayBuffer()], {type: 'audio/ogg'});
       window.lumen = window.lumen || {};
       window.lumen.audio = {
@@ -29,6 +32,7 @@ export function fakeAudioScript(voiceUrl) {
             control.recordError = null;
             throw failure(code, code === 'engine' ? 'Recorder crashed' : '');
           }
+          await delay(control.startDelayMs);
           const started = Date.now();
           let done = false;
           const result = async () => ({blob: await recordingBlob(), mimeType: 'audio/ogg; codecs=opus', durationMs: Date.now() - started});
@@ -39,7 +43,9 @@ export function fakeAudioScript(voiceUrl) {
               log.stops += 1;
               done = true;
               clearInterval(timer);
-              return result();
+              const audio = await result();
+              await delay(control.stopDelayMs);
+              return audio;
             },
             cancel() {
               log.cancels += 1;
@@ -56,7 +62,7 @@ export function fakeAudioScript(voiceUrl) {
               result().then(audio => recording.onEnd && recording.onEnd('max', audio));
               return;
             }
-            recording.onLevel && recording.onLevel(0.2 + 0.6 * Math.abs(Math.sin(elapsed / 300)), elapsed);
+            recording.onLevel && recording.onLevel(0.15 + 0.15 * Math.abs(Math.sin(elapsed / 300)), elapsed);
           }, 200);
           return recording;
         },

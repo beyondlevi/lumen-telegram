@@ -17,7 +17,7 @@ import {
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Navigate, useNavigate, useParams} from 'react-router-dom';
 import {audioErrorMessage} from '../audio/audioErrors';
-import {RECORD_LIMIT_MS, type LumenRecording, type LumenAudioResult} from '../audio/lumenAudio';
+import {meterLevel, RECORD_LIMIT_MS, type LumenRecording, type LumenAudioResult} from '../audio/lumenAudio';
 import {failureReason} from '../failure';
 import {formatDuration} from '../format';
 import {t} from '../i18n/strings';
@@ -32,6 +32,7 @@ type RecordState =
   | {kind: 'starting'}
   | {kind: 'recording'; elapsedMs: number; level: number}
   | {kind: 'limit'; result: LumenAudioResult}
+  | {kind: 'finishing'; elapsedMs: number}
   | {kind: 'sending'; elapsedMs: number}
   | {kind: 'error'; message: string};
 
@@ -59,6 +60,8 @@ function Recorder({chatId}: {chatId: string}) {
   const recordingRef = useRef<Promise<LumenRecording> | null>(null);
   const resultRef = useRef<LumenAudioResult | null>(null);
   const finishedRef = useRef(false);
+  /** False once Back or Discard left the screen: a stop still finishing must not send. */
+  const mountedRef = useRef(true);
   /** Input levels of this recording (about 5 per second), for the voice note's waveform. */
   const levelsRef = useRef<number[]>([]);
   const sendButtonRef = useRef<ButtonHandle>(null);
@@ -77,6 +80,7 @@ function Recorder({chatId}: {chatId: string}) {
       return;
     }
     let alive = true;
+    mountedRef.current = true;
     finishedRef.current = false;
     resultRef.current = null;
     levelsRef.current = [];
@@ -99,7 +103,7 @@ function Recorder({chatId}: {chatId: string}) {
           }
           if (reason === 'max' && result) {
             resultRef.current = result;
-            setState(current => (current.kind === 'sending' ? current : {kind: 'limit', result}));
+            setState(current => (current.kind === 'sending' || current.kind === 'finishing' ? current : {kind: 'limit', result}));
           } else {
             setState({kind: 'error', message: audioErrorMessage(error ?? new Error('error'))});
           }
@@ -114,6 +118,7 @@ function Recorder({chatId}: {chatId: string}) {
     );
     return () => {
       alive = false;
+      mountedRef.current = false;
       // Back or Discard: drop the recording unless it was sent.
       if (!finishedRef.current) {
         void started.then(recording => recording.cancel(), () => undefined);
@@ -122,26 +127,34 @@ function Recorder({chatId}: {chatId: string}) {
   }, [attempt, audio]);
 
   const send = useCallback(async () => {
-    if (state.kind === 'sending' || state.kind === 'error') {
+    if (state.kind !== 'recording' && state.kind !== 'limit') {
       return;
     }
-    const elapsedMs = state.kind === 'recording' ? state.elapsedMs : state.kind === 'limit' ? state.result.durationMs : 0;
-    setState({kind: 'sending', elapsedMs});
+    const elapsedMs = state.kind === 'recording' ? state.elapsedMs : state.result.durationMs;
     try {
       let result = resultRef.current;
       if (result == null) {
+        // The host encodes the audio and brings it over from the phone: a few seconds.
+        setState({kind: 'finishing', elapsedMs});
         const recording = await recordingRef.current;
         if (recording == null) {
           return;
         }
         result = await recording.stop();
+        if (!mountedRef.current) {
+          return;
+        }
         resultRef.current = result;
       }
+      setState({kind: 'sending', elapsedMs: result.durationMs});
       finishedRef.current = true;
       await sendVoice(chatId, result, levelsRef.current);
       Toast.show(t('voiceSent'));
       navigate(-1);
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       if (resultRef.current == null) {
         // Stopping failed: the recording is lost.
         finishedRef.current = false;
@@ -158,7 +171,7 @@ function Recorder({chatId}: {chatId: string}) {
   const retry = useCallback(() => setAttempt(count => count + 1), []);
 
   const elapsedMs =
-    state.kind === 'recording' || state.kind === 'sending'
+    state.kind === 'recording' || state.kind === 'finishing' || state.kind === 'sending'
       ? state.elapsedMs
       : state.kind === 'limit'
         ? state.result.durationMs
@@ -170,9 +183,15 @@ function Recorder({chatId}: {chatId: string}) {
         ? t('recordingNow')
         : state.kind === 'limit'
           ? t('recordingLimit', {limit: formatDuration(RECORD_LIMIT_MS / 1000)})
-          : state.kind === 'sending'
-            ? t('recordingSending')
-            : state.message;
+          : state.kind === 'finishing'
+            ? t('recordingFinishing')
+            : state.kind === 'sending'
+              ? t('recordingSending')
+              : state.message;
+  const waiting = state.kind === 'starting' || state.kind === 'finishing' || state.kind === 'sending';
+  // Send is disabled while the audio arrives. While the microphone starts it stays
+  // enabled (and does nothing), because a disabled Button cannot take the initial focus.
+  const sendDisabled = state.kind === 'finishing' || state.kind === 'sending';
 
   return (
     <Page headerText={t('recordingHeader')} enableSystemBarInset={false}>
@@ -191,14 +210,14 @@ function Recorder({chatId}: {chatId: string}) {
             {state.kind === 'recording' ? (
               <ProgressIndicator
                 size={ProgressIndicatorSize.DEFAULT}
-                value={state.level}
+                value={meterLevel(state.level)}
                 maximumValue={1}
                 isActive
                 announceUpdatesForAccessibility={false}
                 aria-label={t('recordingLevel')}
               />
             ) : null}
-            {state.kind === 'starting' || state.kind === 'sending' ? (
+            {waiting ? (
               <IndeterminateLoader size={IndeterminateLoaderSize.SMALL} />
             ) : null}
             <TextView as="p" textStyle={state.kind === 'error' ? TextStyle.BODY2 : TextStyle.META1} textColor={state.kind === 'error' ? undefined : TextColor.SECONDARY}>
@@ -213,6 +232,7 @@ function Recorder({chatId}: {chatId: string}) {
               ref={sendButtonRef}
               title={state.kind === 'error' ? t('retry') : t('sendVoiceAction')}
               onClick={state.kind === 'error' ? retry : send}
+              disabled={sendDisabled}
             />
             <Button title={t('discardAction')} icon={trashFilled} onClick={discard} />
           </ButtonRail>

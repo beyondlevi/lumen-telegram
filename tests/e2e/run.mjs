@@ -356,16 +356,21 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
     await step(['ArrowRight'], 300, null, async () => {
       assert.equal(await activeLabel(page), 'div|Voice');
     });
-    await step(['Enter'], 2500, '15-recording', async () => {
+    await step(['Enter'], 3000, '15-recording', async () => {
       assert.match(page.url(), /\/record$/);
       assert.equal(await activeLabel(page), 'div|Send');
       await waitForText(page, '0:02', 1000);
     });
-    await step(['Enter'], 1200, '16-voice-sent', async () => {
+    // The demo microphone takes 1 s to start and the audio 2 s to arrive after Send.
+    await step(['Enter'], 300, null, async () => {
+      await waitForText(page, 'Finishing…', 1000);
+      assert.equal(await activeLabel(page), 'div|Send');
+    });
+    await step([], 2200, '16-voice-sent', async () => {
       await waitForText(page, 'Voice message sent', 2000);
       assert.doesNotMatch(page.url(), /\/record$/);
       assert.equal(await activeLabel(page), 'div|Voice');
-      assert.ok((await bubbleLabels(page)).some(label => /You: Voice message, 0:0[23]/.test(label)), 'sent voice note');
+      assert.ok((await bubbleLabels(page)).some(label => /You: Voice message, 0:0[234]/.test(label)), 'sent voice note');
     });
     // 9. Voice message menu: Listen, Pause, Transcribe
     await step(['ArrowLeft', ...Array(5).fill('ArrowUp')], 300, null, async () => {
@@ -392,7 +397,7 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
       await waitForText(page, 'Transcribing', 1000);
       await waitForText(page, 'Morning! Quick update', 1000);
     });
-    await step([], 2500, '21-transcript', async () => {
+    await step([], 4000, '21-transcript', async () => {
       await waitForText(page, 'Save me a seat, see you soon.', 1000);
       assert.equal(await page.getByText('Transcribing').count(), 0);
     });
@@ -745,6 +750,51 @@ async function voiceFlow(browser) {
     await waitForText(page, 'Voice message sent', 5000);
     assert.equal((await voiceSent()).length, 2);
     await control({endAfterMs: null});
+    await page.waitForTimeout(500);
+
+    // A host as slow as the glasses: "Starting…" until record() resolves, then
+    // "Finishing…" until stop() resolves; Send is disabled in both and keeps the focus.
+    const sendDisabled = () =>
+      page.evaluate(() => [...document.querySelectorAll('[aria-disabled="true"], [disabled]')].some(element => /^Send$/.test((element.textContent ?? '').trim()) || element.getAttribute('aria-label') === 'Send'));
+    // The thread behind may show "0:01" too: read the time in the recording panel only.
+    const panelShows = text => page.locator('.record-panel').getByText(text, {exact: true}).waitFor({timeout: 4000});
+    await control({startDelayMs: 1500, stopDelayMs: 2000});
+    await press(page, 'Enter');
+    await page.waitForURL(/\/record$/);
+    await waitForText(page, 'Starting…', 1000);
+    assert.equal(await activeLabel(page), 'div|Send', 'Send has the focus while the microphone starts');
+    await page.waitForTimeout(600); // let the route transition finish (the microphone takes 1.5 s here)
+    await page.getByText('Starting…').first().waitFor({timeout: 500});
+    await page.screenshot({path: path.join(outDir, 'voice-5-starting.png')});
+    const stopsBefore = (await audioLog()).stops;
+    await press(page, 'Enter');
+    await page.waitForTimeout(200);
+    assert.equal((await audioLog()).stops, stopsBefore, 'Send does nothing until the microphone has started');
+    await panelShows('0:01');
+    assert.equal(await sendDisabled(), false, 'Send is enabled while recording');
+    assert.equal(await activeLabel(page), 'div|Send');
+    await press(page, 'Enter');
+    await waitForText(page, 'Finishing…', 1000);
+    assert.equal(await sendDisabled(), true, 'Send is disabled while the audio arrives');
+    assert.equal(await activeLabel(page), 'div|Send', 'Send keeps the focus while finishing');
+    await page.screenshot({path: path.join(outDir, 'voice-6-finishing.png')});
+    await press(page, 'Enter');
+    await waitForText(page, 'Voice message sent', 5000);
+    assert.equal((await audioLog()).stops, stopsBefore + 1, 'Enter while finishing does nothing');
+    assert.equal((await voiceSent()).length, 3);
+    await page.waitForURL(`**/chat/${ANA}`);
+    await page.waitForTimeout(500);
+    // Back while finishing drops the recording: nothing is sent when stop() resolves
+    await press(page, 'Enter');
+    await page.waitForURL(/\/record$/);
+    await panelShows('0:01');
+    await press(page, 'Enter');
+    await waitForText(page, 'Finishing…', 1000);
+    await press(page, 'Escape');
+    await page.waitForURL(`**/chat/${ANA}`);
+    await page.waitForTimeout(2500);
+    assert.equal((await voiceSent()).length, 3, 'Back while finishing sends nothing');
+    await control({startDelayMs: 0, stopDelayMs: 0});
     await page.waitForTimeout(500);
 
     // Host errors: busy (then Try again works), no-phone
