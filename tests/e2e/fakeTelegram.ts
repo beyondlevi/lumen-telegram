@@ -97,6 +97,8 @@ function seed(): FakeChat[] {
         msg('1005', false, 4400, {kind: 'document', text: 'orcamento.pdf'}, 'Diego Alves'),
         msg('1005', false, 4300, {kind: 'location', text: 'Praça Central'}, 'Diego Alves'),
         msg('1005', false, 4200, {kind: 'contact', text: 'Rita Gomes'}, 'Diego Alves'),
+        // An audio file (not a voice note): still a playable audio bubble.
+        msg('1005', false, 4150, {kind: 'audio', text: '', seconds: 6, voice: false}, 'Diego Alves', {media: {url: voiceNote, mimetype: 'audio/ogg'}}),
         msg('1005', false, 4100, {kind: 'video', text: ''}, 'Diego Alves'),
       ],
     },

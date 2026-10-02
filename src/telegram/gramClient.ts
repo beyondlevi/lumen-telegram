@@ -116,6 +116,15 @@ function toBytes(value: unknown): Uint8Array | null {
 }
 
 /**
+ * The app model of a message this session just sent. It is ours whatever the
+ * response's `out` flag says, so the list reads "You: …" and the bubble is outgoing.
+ */
+export function sentMessage(value: object | null | undefined, chatId: string): ChatMessage | null {
+  const message = toMessage(value, {chatId});
+  return message ? {...message, fromMe: true} : null;
+}
+
+/**
  * Sends a native voice note: an OGG/Opus document with documentAttributeAudio
  * voice=true, its length and the 5-bit waveform, so Telegram shows the
  * waveform and plays it inline.
@@ -289,7 +298,7 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
           message: text,
           ...(replyToId ? {replyTo: Number(replyToId)} : {}),
         });
-        const message = toMessage(sent, {chatId});
+        const message = sentMessage(sent, chatId);
         if (!message) {
           throw new TelegramError('server', 'Telegram did not return the sent message');
         }
@@ -299,7 +308,7 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
     sendVoice: (chatId, voice) =>
       call(async () => {
         const sent = await sendVoiceNote(client, await entityFor(chatId), voice);
-        const message = toMessage(sent, {chatId});
+        const message = sentMessage(sent, chatId);
         if (!message) {
           throw new TelegramError('server', 'Telegram did not return the sent voice note');
         }

@@ -20,6 +20,8 @@ export type MessageContent = {
   text: string;
   /** Audio: length in seconds, when known. */
   seconds?: number;
+  /** Audio: a voice note (recorded message) rather than an audio file such as music. */
+  voice?: boolean;
 };
 
 export type ReactionSummary = {

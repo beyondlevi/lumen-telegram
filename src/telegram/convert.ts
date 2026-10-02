@@ -78,9 +78,12 @@ export function messageContent(value: object): MessageContent | null {
         return {kind: 'sticker', text: typeof sticker.alt === 'string' ? sticker.alt : ''};
       }
       const audio = attribute(document, 'DocumentAttributeAudio');
-      if (audio || media.voice) {
+      const mimeType = typeof document.mimeType === 'string' ? document.mimeType : '';
+      // Voice notes and audio files (music, an .ogg sent as a file) both play as an audio bubble.
+      if (audio || media.voice || (mimeType.startsWith('audio/') && !attribute(document, 'DocumentAttributeVideo'))) {
         const seconds = typeof audio?.duration === 'number' && audio.duration > 0 ? audio.duration : undefined;
-        return seconds ? {kind: 'audio', text, seconds} : {kind: 'audio', text};
+        const voice = audio?.voice === true || media.voice === true;
+        return {kind: 'audio', text, ...(seconds ? {seconds} : {}), voice};
       }
       if (attribute(document, 'DocumentAttributeVideo') || attribute(document, 'DocumentAttributeAnimated') || media.video || media.round) {
         return {kind: 'video', text};

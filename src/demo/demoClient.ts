@@ -117,7 +117,7 @@ export function createDemoClient(): ChatApi {
       const sent = add(chat, {
         fromMe: true,
         senderName: null,
-        content: {kind: 'audio', text: '', seconds: Math.max(1, Math.round(voice.durationMs / 1000))},
+        content: {kind: 'audio', text: '', seconds: Math.max(1, Math.round(voice.durationMs / 1000)), voice: true},
         media: {url: voiceNote, mimetype: 'audio/ogg'},
       });
       return toModel(chat, sent);

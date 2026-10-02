@@ -5,6 +5,7 @@
 //   E2E_SKIP_SLOW=1 npm run test:e2e        (skips the 30 s retry-window test)
 //   E2E_VIEWPORT=480x640 npm run test:e2e   (Rokid HUD size; default 600x600)
 //   E2E_TRACE=1                             (prints the focus after each key of the capture script)
+//   E2E_ONLY='voice notes'                  (runs only the tests whose name matches)
 //
 // Two builds are served like the Lumen host serves a package (static files,
 // SPA fallback):
@@ -90,6 +91,18 @@ async function rowLabels(page) {
   return page.$$eval('[role="button"][aria-label]', elements => elements.map(element => element.getAttribute('aria-label')));
 }
 
+/** Whether the bubble whose label matches is on screen, between the header and the action rail. */
+async function bubbleOnScreen(page, pattern) {
+  return page.evaluate(source => {
+    const bubble = [...document.querySelectorAll('.message-stack [aria-label]')].filter(element => new RegExp(source).test(element.getAttribute('aria-label') ?? '')).pop();
+    if (!bubble) return 'missing';
+    const rect = bubble.getBoundingClientRect();
+    const dock = document.querySelector('.action-dock')?.getBoundingClientRect();
+    const bottom = dock ? dock.top : window.innerHeight;
+    return rect.height > 0 && rect.top >= 0 && rect.bottom <= bottom + 1 ? 'visible' : `off screen (${Math.round(rect.top)}..${Math.round(rect.bottom)}, rail at ${Math.round(bottom)})`;
+  }, pattern.source);
+}
+
 async function bubbleLabels(page) {
   return page.$$eval('.message-stack [aria-label]', elements => elements.map(element => element.getAttribute('aria-label')));
 }
@@ -137,6 +150,8 @@ async function escapeReachesHost(page) {
 }
 
 async function test(name, fn) {
+  // E2E_ONLY=<regex> runs only the matching tests (e.g. E2E_ONLY='voice notes').
+  if (process.env.E2E_ONLY && !new RegExp(process.env.E2E_ONLY).test(name)) return;
   const started = Date.now();
   try {
     await fn();
@@ -373,7 +388,7 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
       assert.ok((await bubbleLabels(page)).some(label => /You: Voice message, 0:0[234]/.test(label)), 'sent voice note');
     });
     // 9. Voice message menu: Listen, Pause, Transcribe
-    await step(['ArrowLeft', ...Array(5).fill('ArrowUp')], 300, null, async () => {
+    await step(['ArrowLeft', ...Array(6).fill('ArrowUp')], 300, null, async () => {
       assert.match(await activeLabel(page), /Maya Chen: Voice message, 0:06/);
     });
     await step(['Enter'], 800, '17-audio-menu', async () => {
@@ -425,7 +440,7 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
     });
     // 11. Back to the list
     await step(['Escape'], 1500, '26-list-after', async () => {
-      assert.match(await activeLabel(page), /^div\|Maya Chen, You: Audio, /);
+      assert.match(await activeLabel(page), /^div\|Maya Chen, You: Voice message, /);
       assert.deepEqual(await unreadRows(page), ['Library News, Unread Status', '+12025550199, Unread Status']);
     });
     // 12. A channel without reactions: the menu says so
@@ -476,7 +491,7 @@ async function mainFlow(browser, label) {
         'Ana Souza, Levo o projetor',
         '+15550100106, Sticker: 👋',
         'Família, Bruno: Photo: Olha isso',
-        'Carla Dias, You: Audio',
+        'Carla Dias, You: Voice message',
         'Avisos, Poll: Melhor horário?',
         'Diego Alves, Video',
       ],
@@ -578,8 +593,17 @@ async function mainFlow(browser, label) {
     await press(page, 'Enter');
     for (const text of ['Document: orcamento.pdf', 'Location: Praça Central', 'Contact: Rita Gomes', 'Video']) await waitForText(page, text);
     await page.waitForTimeout(600);
-    await press(page, 'ArrowDown');
-    await press(page, 'ArrowLeft');
+    // An audio file that is not a voice note shows as a playable audio bubble with Listen and Transcribe
+    assert.ok((await bubbleLabels(page)).some(label => /Diego Alves: Audio, 0:06/.test(label)), `audio file bubble: ${JSON.stringify(await bubbleLabels(page))}`);
+    assert.ok(!(await bubbleLabels(page)).some(label => /Diego Alves: Voice message/.test(label)), 'an audio file is not called a voice message');
+    await page.evaluate(() => [...document.querySelectorAll('[aria-haspopup="menu"]')].find(element => /Diego Alves: Audio, 0:06/.test(element.getAttribute('aria-label') ?? ''))?.focus());
+    await press(page, 'Enter');
+    assert.equal(await activeLabel(page), 'div|Listen');
+    assert.ok(await page.getByText('Transcribe', {exact: true}).count() >= 1, 'Transcribe in the audio file menu');
+    await press(page, 'Escape');
+    await page.waitForTimeout(400);
+    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photos)$/);
+    await pressUntil(page, 'ArrowLeft', /^div\|Reply$/);
     await press(page, 'Enter');
     await dictate(page, 'Recebi, obrigado');
     await press(page, 'ArrowRight');
@@ -719,6 +743,24 @@ async function voiceFlow(browser) {
       const label = await activeLabel(page);
       assert.equal(label, 'div|Voice', `focus returns to Voice, got ${label}`);
     }
+    // The sent note is on screen above the rail (0.2.0 left it under the rail, out of view and
+    // skipped by Up), reachable with Up, previewed as yours, and shown again when the chat reopens.
+    assert.equal(await bubbleOnScreen(page, /You: Voice message/), 'visible', 'the sent voice note is in view after sending');
+    await page.screenshot({path: path.join(outDir, 'voice-7-sent-in-view.png')});
+    await press(page, 'ArrowUp');
+    assert.match(await activeLabel(page), /^div\|Actions for message: You: Voice message, 0:0\d/, 'Up from Voice reaches the sent voice note');
+    await press(page, 'Escape');
+    await page.waitForURL(`${FAKE_APP}/`);
+    await page.waitForTimeout(800);
+    assert.match(await activeLabel(page), /^div\|Ana Souza, You: Voice message, /, 'the list previews the note as yours');
+    await press(page, 'Enter');
+    await page.waitForURL(`**/chat/${ANA}`);
+    await page.waitForTimeout(1500);
+    assert.equal(await bubbleOnScreen(page, /You: Voice message/), 'visible', 'the voice note is in view when the chat reopens');
+    assert.match(await activeLabel(page), /^div\|Actions for message: You: Voice message/, 'reopening focuses the newest message');
+    await page.screenshot({path: path.join(outDir, 'voice-8-reopened.png')});
+    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photos)$/);
+    if (await activeLabel(page) !== 'div|Voice') await pressUntil(page, 'ArrowLeft', /^div\|Voice$/);
 
     // Discard, then Back: nothing sent, recordings cancelled
     await press(page, 'Enter');
@@ -905,7 +947,7 @@ async function run() {
             await page.goto(`${FAKE_APP}/`);
             await waitForText(page, 'Conversas');
             await waitForText(page, 'Bruno: Foto: Olha isso');
-            await waitForText(page, 'Você: Áudio');
+            await waitForText(page, 'Você: Mensagem de voz');
             await waitForText(page, 'Figurinha: 👋');
             await page.screenshot({path: path.join(outDir, `${name}-pt-list.png`)});
           } finally {

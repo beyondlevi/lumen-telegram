@@ -3,7 +3,7 @@ import bigInt from 'big-integer';
 import {Api, TelegramClient} from 'telegram';
 import {StringSession} from 'telegram/sessions';
 import {describe, expect, it} from 'vitest';
-import {sendVoiceNote} from '../../src/telegram/gramClient';
+import {sendVoiceNote, sentMessage} from '../../src/telegram/gramClient';
 import {decodeWaveform, encodeWaveform} from '../../src/telegram/waveform';
 
 describe('sendVoiceNote (GramJS sendFile with the network replaced)', () => {
@@ -28,7 +28,14 @@ describe('sendVoiceNote (GramJS sendFile with the network replaced)', () => {
           peerId: new Api.PeerUser({userId: bigInt(42)}),
           date: 1790000000,
           message: '',
-          media: new Api.MessageMediaDocument({voice: true, document: new Api.DocumentEmpty({id: bigInt(1)})}),
+          media: new Api.MessageMediaDocument({
+            voice: true,
+            document: new Api.Document({
+              id: bigInt(1), accessHash: bigInt(2), fileReference: Buffer.alloc(0), date: 1790000000,
+              mimeType: (request.media as Api.InputMediaUploadedDocument).mimeType, size: bigInt(5004), dcId: 2,
+              attributes: (request.media as Api.InputMediaUploadedDocument).attributes,
+            }),
+          }),
         });
         return new Api.Updates({
           updates: [
@@ -58,6 +65,17 @@ describe('sendVoiceNote (GramJS sendFile with the network replaced)', () => {
     expect(audio.duration).toBe(4);
     expect(decodeWaveform(new Uint8Array(audio.waveform ?? []))).toHaveLength(100);
     expect(media.mimeType).toBe('audio/ogg');
+    expect(media.forceFile).toBeFalsy();
+    // Only one audio attribute (ours replaces the one GramJS derives from the file name)
+    expect(media.attributes.filter(item => item instanceof Api.DocumentAttributeAudio)).toHaveLength(1);
+    // The message the app keeps: an outgoing voice note of 4 s
+    expect(sentMessage(sent, '42')).toMatchObject({id: '77', chatId: '42', fromMe: true, content: {kind: 'audio', seconds: 4, voice: true}});
+  });
+
+  it('keeps a message the app sent as yours even without the out flag', () => {
+    const response = new Api.Message({id: 5, peerId: new Api.PeerUser({userId: bigInt(42)}), date: 1790000000, message: 'Oi'});
+    expect(sentMessage(response, '42')?.fromMe).toBe(true);
+    expect(sentMessage(undefined, '42')).toBeNull();
   });
 });
 

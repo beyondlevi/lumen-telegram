@@ -82,6 +82,7 @@ const en = {
   markerPhoto: 'Photo',
   markerVideo: 'Video',
   markerAudio: 'Audio',
+  markerVoice: 'Voice message',
   markerSticker: 'Sticker',
   markerDocument: 'Document',
   markerLocation: 'Location',
@@ -100,6 +101,7 @@ const en = {
   photoFailedBody: 'Telegram could not send this photo ({reason}).',
 
   audioLabel: 'Voice message, {duration}',
+  audioFileLabel: 'Audio, {duration}',
   audioPlaying: 'Playing, {position} of {duration}',
   audioPaused: 'Paused, {position} of {duration}',
   audioLoading: 'Loading audio',
@@ -225,6 +227,7 @@ const pt: Strings = {
   markerPhoto: 'Foto',
   markerVideo: 'Vídeo',
   markerAudio: 'Áudio',
+  markerVoice: 'Mensagem de voz',
   markerSticker: 'Figurinha',
   markerDocument: 'Documento',
   markerLocation: 'Localização',
@@ -243,6 +246,7 @@ const pt: Strings = {
   photoFailedBody: 'O Telegram não conseguiu enviar esta foto ({reason}).',
 
   audioLabel: 'Mensagem de voz, {duration}',
+  audioFileLabel: 'Áudio, {duration}',
   audioPlaying: 'Tocando, {position} de {duration}',
   audioPaused: 'Pausado, {position} de {duration}',
   audioLoading: 'Carregando áudio',

@@ -18,11 +18,28 @@ function document(attributes: Api.TypeDocumentAttribute[], mimeType = 'applicati
 }
 
 describe('messageContent', () => {
+  it('shows every audio as a playable audio bubble and tells voice notes from audio files', () => {
+    const audioDocument = (attributes: Api.TypeDocumentAttribute[], mimeType: string, voiceFlag = false) =>
+      messageContent(message({media: new Api.MessageMediaDocument({voice: voiceFlag, document: document(attributes, mimeType)})}));
+    // What GramJS sendFile({voiceNote: true}) uploads: a file name and the voice attribute
+    expect(audioDocument([new Api.DocumentAttributeFilename({fileName: 'voice.ogg'}), new Api.DocumentAttributeAudio({voice: true, duration: 22})], 'audio/ogg', true))
+      .toEqual({kind: 'audio', text: '', seconds: 22, voice: true});
+    // The voice attribute alone marks a voice note, even without the media flag
+    expect(audioDocument([new Api.DocumentAttributeAudio({voice: true, duration: 5})], 'audio/ogg')).toEqual({kind: 'audio', text: '', seconds: 5, voice: true});
+    // An audio file (music, an .ogg sent as a file): audio, not voice
+    expect(audioDocument([new Api.DocumentAttributeAudio({duration: 180, title: 'Song'}), new Api.DocumentAttributeFilename({fileName: 'song.mp3'})], 'audio/mpeg'))
+      .toEqual({kind: 'audio', text: '', seconds: 180, voice: false});
+    // An audio document with only a file name: still audio (it used to be a "Document")
+    expect(audioDocument([new Api.DocumentAttributeFilename({fileName: 'note.ogg'})], 'audio/ogg')).toEqual({kind: 'audio', text: '', voice: false});
+    // A video with a sound track stays a video
+    expect(audioDocument([new Api.DocumentAttributeVideo({duration: 3, w: 1, h: 1})], 'audio/mp4')).toEqual({kind: 'video', text: ''});
+  });
+
   it('reads text, photos and every marker kind', () => {
     expect(messageContent(message({message: 'Hi'}))).toEqual({kind: 'text', text: 'Hi'});
     expect(messageContent(message({message: 'Look', media: new Api.MessageMediaPhoto({})}))).toEqual({kind: 'photo', text: 'Look'});
     const voice = message({media: new Api.MessageMediaDocument({voice: true, document: document([new Api.DocumentAttributeAudio({voice: true, duration: 9})], 'audio/ogg')})});
-    expect(messageContent(voice)).toEqual({kind: 'audio', text: '', seconds: 9});
+    expect(messageContent(voice)).toEqual({kind: 'audio', text: '', seconds: 9, voice: true});
     const sticker = message({media: new Api.MessageMediaDocument({document: document([new Api.DocumentAttributeSticker({alt: '👋', stickerset: new Api.InputStickerSetEmpty()})])})});
     expect(messageContent(sticker)).toEqual({kind: 'sticker', text: '👋'});
     const video = message({media: new Api.MessageMediaDocument({document: document([new Api.DocumentAttributeVideo({duration: 3, w: 1, h: 1})])})});

@@ -28,8 +28,12 @@ import {recordPath} from './RecordPage';
 import {StatusPage} from './StatusPage';
 import {transcriptPath} from './TranscriptPage';
 
-/** Set when Voice opens the recording screen; read when the conversation shows again. */
-const returnToVoice = {pending: false};
+/**
+ * How the conversation was left, read when it shows again: Voice opened the
+ * recording screen, or a bubble opened a photo or a transcript. Any other
+ * showing (from the list) is an opening of the conversation.
+ */
+const returnTo = {voice: false, bubble: false};
 
 export function photoPath(chatId: string, messageId: string): string {
   return `/chat/${encodeURIComponent(chatId)}/photo/${encodeURIComponent(messageId)}`;
@@ -64,6 +68,19 @@ function useHeaderHeight(pageRef: {current: PageHandle | null}): number {
   return height;
 }
 
+/** Moves the focus from an older bubble of the list to the newest one. */
+function focusNewestBubble(list: HTMLElement | null | undefined) {
+  const focused = document.activeElement;
+  if (list == null || !(focused instanceof HTMLElement) || !list.contains(focused)) {
+    return;
+  }
+  const rows = list.querySelectorAll('.message-row');
+  const newest = rows[rows.length - 1]?.querySelector<HTMLElement>('[aria-haspopup="menu"]');
+  if (newest != null && !newest.contains(focused)) {
+    newest.focus({preventScroll: true});
+  }
+}
+
 function Thread({chatId}: {chatId: string}) {
   const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor} =
     useChat();
@@ -87,6 +104,8 @@ function Thread({chatId}: {chatId: string}) {
   const replyButtonRef = useRef<ButtonHandle>(null);
   const voiceButtonRef = useRef<ButtonHandle>(null);
   const pageRef = useRef<PageHandle>(null);
+  // Marks the end of the conversation (below the newest bubble and its time).
+  const endRef = useRef<HTMLDivElement>(null);
   const headerHeight = useHeaderHeight(pageRef);
 
   const showAudioError = useCallback(
@@ -120,23 +139,54 @@ function Thread({chatId}: {chatId: string}) {
     [composerOpen, location.pathname, navigate],
   );
   const startReply = useCallback(() => openComposer(null), [openComposer]);
-  const viewPhoto = useCallback((message: ChatMessage) => navigate(photoPath(chatId, message.id)), [chatId, navigate]);
-  const transcribe = useCallback((message: ChatMessage) => navigate(transcriptPath(chatId, message.id)), [chatId, navigate]);
+  const viewPhoto = useCallback(
+    (message: ChatMessage) => {
+      returnTo.bubble = true;
+      navigate(photoPath(chatId, message.id));
+    },
+    [chatId, navigate],
+  );
+  const transcribe = useCallback(
+    (message: ChatMessage) => {
+      returnTo.bubble = true;
+      navigate(transcriptPath(chatId, message.id));
+    },
+    [chatId, navigate],
+  );
   const record = useCallback(() => {
-    returnToVoice.pending = true;
+    returnTo.voice = true;
     navigate(recordPath(chatId));
   }, [chatId, navigate]);
-  // Back from the recording screen lands on Voice. Focus is restored by row
-  // position, which a just-sent voice note shifts by one, so set it here.
+  // Each time the conversation shows (not the reply composer), after the route
+  // has restored the focus and scroll of the previous visit:
+  // - back from the recording screen: focus Voice, with the sent note in view;
+  // - back from a photo or a transcript: keep the restored bubble;
+  // - opened from the list: show the newest message. The restored focus may be
+  //   an older bubble and the restored scroll leaves newer ones (such as a voice
+  //   note sent last time) under the rail, out of view and skipped by Up.
   useEffect(() => {
-    if (!returnToVoice.pending || location.pathname !== `/chat/${encodeURIComponent(chatId)}`) {
+    if (composerOpen || location.pathname !== `/chat/${encodeURIComponent(chatId)}`) {
       return;
     }
-    returnToVoice.pending = false;
+    const fromVoice = returnTo.voice;
+    const fromBubble = returnTo.bubble;
+    returnTo.voice = false;
+    returnTo.bubble = false;
+    if (fromBubble && !fromVoice) {
+      return;
+    }
     let frame = window.requestAnimationFrame(() => {
-      frame = window.requestAnimationFrame(() => voiceButtonRef.current?.getElement()?.focus({preventScroll: true}));
+      frame = window.requestAnimationFrame(() => {
+        if (fromVoice) {
+          voiceButtonRef.current?.getElement()?.focus({preventScroll: true});
+        } else {
+          focusNewestBubble(endRef.current?.parentElement);
+        }
+        endRef.current?.scrollIntoView({block: 'end'});
+      });
     });
     return () => window.cancelAnimationFrame(frame);
+    // Once per showing of the conversation; new messages are revealed below.
   }, [chatId, location.key, location.pathname]);
 
   const react = useCallback(
@@ -150,8 +200,6 @@ function Thread({chatId}: {chatId: string}) {
     [sendReaction],
   );
 
-  // Marks the end of the conversation (below the newest bubble and its time).
-  const endRef = useRef<HTMLDivElement>(null);
   const lastMessageId = messages.length ? messages[messages.length - 1].id : null;
   const lastMessageFromMe = messages.length ? messages[messages.length - 1].fromMe : false;
 

@@ -32,7 +32,7 @@ import {
   type ButtonHandle,
 } from '@wearables-ui-toolkit/mrbd';
 import {useLayoutEffect, useMemo, useRef, useState, type MouseEvent} from 'react';
-import {describeContent, formatBubbleTime, formatDuration, isMarker, snippet} from '../format';
+import {describeContent, formatBubbleTime, formatDuration, isMarker, isVoiceNote, snippet} from '../format';
 import {t} from '../i18n/strings';
 import type {AudioState} from '../state/useAudioPlayer';
 import {displayEmoji} from '../telegram/convert';
@@ -115,7 +115,7 @@ function audioDescription(message: ChatMessage, audio: AudioState | undefined): 
     case 'loading':
       return t('audioLoading');
     default:
-      return t('audioLabel', {duration});
+      return t(isVoiceNote(message.content) ? 'audioLabel' : 'audioFileLabel', {duration});
   }
 }
 
@@ -141,7 +141,7 @@ function AudioContent({message, audio, transcript}: {message: ChatMessage; audio
             maximumValue={duration || 1}
             isActive={status === 'playing'}
             announceUpdatesForAccessibility={false}
-            aria-label={t('audioLabel', {duration: formatDuration(duration)})}
+            aria-label={t(isVoiceNote(message.content) ? 'audioLabel' : 'audioFileLabel', {duration: formatDuration(duration)})}
           />
           <TextView as="p" textStyle={TextStyle.META2} textColor={TextColor.SECONDARY}>
             {status === 'error'

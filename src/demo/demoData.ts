@@ -82,7 +82,7 @@ const photo = (caption: string, url: string): Partial<DemoMessage> & {content: M
   media: {url, mimetype: 'image/webp'},
 });
 const voice = (): Partial<DemoMessage> & {content: MessageContent} => ({
-  content: {kind: 'audio', text: '', seconds: VOICE_SECONDS},
+  content: {kind: 'audio', text: '', seconds: VOICE_SECONDS, voice: true},
   media: {url: voiceNote, mimetype: 'audio/ogg'},
 });
 

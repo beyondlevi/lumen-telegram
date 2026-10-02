@@ -23,6 +23,9 @@ through WebSocket, with no server in between.
   in GeckoView and in Chromium. One message plays at a time; playback stops when the conversation closes.
   Enter on a voice message opens its menu: **Listen** (it reads **Pause** while playing), **Transcribe**,
   the four reactions and Reply.
+  - Audio files (music, an `.ogg` or `.mp3` sent as a file: `documentAttributeAudio` without `voice`, or
+    any `audio/*` document) get the same playable bubble and menu, labeled "Audio" instead of "Voice
+    message" (also in the list preview: "You: Voice message" / "You: Audio").
 - **Sending voice notes**: **Voice** opens the recording screen, which records through the Lumen host's
   microphone API (see "Lumen audio API" below). Send uploads a native Telegram voice note:
   - an OGG/Opus document with `documentAttributeAudio` (`voice=true`, the duration in seconds, and the
@@ -42,6 +45,10 @@ through WebSocket, with no server in between.
 - **Previews**: the newest message. A reaction is never previewed as a message. When someone else's unread
   reaction is the newest thing on your last message, the row reads `Reacted ❤️ to “…”`, with the sender's
   first name in groups.
+- **Opening a conversation** from the list shows the newest message: the route would restore the focus
+  and scroll of the previous visit (an older bubble, with newer ones under the rail), so the newest
+  bubble gets the focus and the end is revealed. Back from a photo or a transcript keeps the bubble you
+  were on.
 - **Conversation actions**: a bottom rail with Reply, Voice (records a voice note when the host has
   `window.lumen.audio`, disabled otherwise) and Photos (disabled).
 - **Reply**: the text field (the toolkit's `InputTextView`) appears only after Reply, as its own history
@@ -277,8 +284,10 @@ interface LumenRecording {
   - Discard or Back cancels without sending, also while finishing;
   - at 2:00 the host ends the recording (`onEnd('max', result)`), and the screen says so and keeps
     Send / Discard;
-  - while sending, a spinner; then the Toast "Voice message sent", and the conversation shows the note,
-    playable at once from memory;
+  - while sending, a spinner; then the Toast "Voice message sent", and the conversation shows the note
+    in view above the rail, playable at once from memory (the route restores the previous scroll, so the
+    end of the conversation is revealed again after that restoration);
+  - the sent message is kept as yours (`fromMe`) whatever the response's `out` flag says.
   - host errors show a message with **Try again**.
 - **Transcription screen** (`/chat/:id/transcript/:messageId`, Back closes):
   - downloads the voice note like Listen, calls `transcribe`, and shows the partial text live, then the
@@ -360,6 +369,9 @@ Chromium and Firefox):
 - recording, Send, Discard, Back and the 2-minute limit (`maxMs: 120000`, `onEnd('max')`);
 - a host as slow as the glasses (start 1.5 s, file 2 s after `stop()`): "Starting…", "Finishing…" with
   Send disabled and focused, Enter ignored while finishing, Back while finishing sends nothing;
+- after sending, the note is on screen above the rail, Up from Voice reaches it, the list reads "You: Voice
+  message", and reopening the chat shows and focuses it (0.2.0 left it under the rail);
+- an audio file that is not a voice note is a playable "Audio" bubble with Listen and Transcribe;
 - the voice note sent with its length and 100-sample waveform (checked on the scripted Telegram); a unit test runs the real GramJS `sendFile` with the network replaced and checks the upload and the `documentAttributeAudio`;
 - the `busy` and `no-phone` errors and Try again;
 - the voice menu (Listen, Pause, Transcribe);

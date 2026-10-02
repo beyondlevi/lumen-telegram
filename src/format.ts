@@ -15,12 +15,17 @@ const MARKER_KEYS: Partial<Record<MessageContent['kind'], StringKey>> = {
   unsupported: 'markerUnsupported',
 };
 
+/** A voice note, as opposed to an audio file (content cached by older versions has no flag: voice). */
+export function isVoiceNote(content: MessageContent): boolean {
+  return content.kind === 'audio' && content.voice !== false;
+}
+
 /** Text shown for a message: the body, or a marker such as "Photo: caption". */
 export function describeContent(content: MessageContent): string {
   if (content.kind === 'text') {
     return content.text;
   }
-  const marker = t(MARKER_KEYS[content.kind] ?? 'markerUnsupported');
+  const marker = t(isVoiceNote(content) ? 'markerVoice' : MARKER_KEYS[content.kind] ?? 'markerUnsupported');
   return content.text ? t('markerWithCaption', {marker, caption: content.text}) : marker;
 }
 
