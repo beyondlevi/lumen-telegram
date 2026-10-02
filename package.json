@@ -1,0 +1,42 @@
+{
+  "name": "lumen-telegram",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "package": "npm run build && node scripts/package-offline.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:e2e": "node tests/e2e/run.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "build:e2e": "vite build --mode e2e --outDir dist-e2e",
+    "test:live": "node tests/live/transport.mjs",
+    "login": "node scripts/login.mjs",
+    "media": "node scripts/generate-demo-media.mjs"
+  },
+  "dependencies": {
+    "@wearables-ui-toolkit/icons": "129.0.0",
+    "@wearables-ui-toolkit/mrbd": "129.0.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router-dom": "7.17.0",
+    "telegram": "2.26.22",
+    "buffer": "6.0.3",
+    "path-browserify": "1.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.1",
+    "fflate": "0.8.3",
+    "playwright": "1.55.0",
+    "sharp": "0.35.4",
+    "typescript": "5.9.3",
+    "vite": "8.0.0",
+    "vitest": "5.0.2"
+  },
+  "description": "Telegram client (MTProto user account through GramJS) for Rokid Lumen glasses, built as a Meta Ray-Ban Display web app."
+}

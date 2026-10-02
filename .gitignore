@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.mrbd.zip
+.wearables-test/
+.e2e-output/
+.env
+.env.*
+.vercel/
+*.log
+dist-e2e/
+.explore/

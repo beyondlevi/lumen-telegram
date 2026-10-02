@@ -1,0 +1,24 @@
+{
+  "id": "cloud.bynd.lumen.telegram",
+  "name": "Telegram for Lumen",
+  "short_name": "Telegram",
+  "version": "0.1.0",
+  "description": "Read and answer Telegram chats with your own account (MTProto).",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any monochrome"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any monochrome"}
+  ],
+  "lumen_config": [
+    {"key": "telegram.apiId", "label": "API ID (my.telegram.org)", "type": "text"},
+    {"key": "telegram.apiHash", "label": "API hash (my.telegram.org)", "type": "secret"},
+    {"key": "telegram.session", "label": "Session (npm run login)", "type": "secret"},
+    {"key": "demo", "label": "Demo mode (screenshots)", "type": "text", "optional": true}
+  ],
+  "lumen_internet": true
+}

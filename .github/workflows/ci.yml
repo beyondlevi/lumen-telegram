@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build and package (.mrbd.zip)
+        run: npm run package
+      - name: E2E build (scripted Telegram)
+        run: npm run build:e2e
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+      - name: Keyboard E2E
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumen-telegram.mrbd.zip
+          path: dist/lumen-telegram.mrbd.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: .e2e-output/
+
+  # Real Telegram servers, no account: transport and "Session not accepted".
+  # Informational: depends on Telegram being reachable from the runner.
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run package
+      - run: npx playwright install --with-deps chromium firefox
+      - name: Live transport check (with a local CONNECT proxy)
+        run: npm run test:live
+        env:
+          LIVE_PROXY: '1'

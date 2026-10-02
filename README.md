@@ -1,0 +1,288 @@
+# lumen-telegram
+
+Telegram client for **Rokid Lumen** glasses, built as a Meta Ray-Ban Display (MRBD) web app with the official
+[UI Toolkit for Meta Ray-Ban Display](https://github.com/facebook/meta-ray-ban-display-ui-toolkit-web). It is
+the sibling of `lumen-whatsapp` and has the same screens and controls. It signs in as **your Telegram user
+account** over MTProto with [GramJS](https://gram.js.org) (`telegram` on npm), straight from the browser
+through WebSocket, with no server in between.
+
+- **Chats**: profile photo, name, preview, and time for the 40 most recent chats (archived chats excluded).
+  Unread chats have an unread dot on the avatar and an accent-colored time. A chat without a name shows the
+  phone number, and an icon in place of the photo. The last list and the 30 most recent messages of up to
+  20 chats are cached in localStorage under a one-way digest of the account (never the API hash or the
+  session). On launch the cached list shows at once, and the header shows "Loading…" with a spinner until
+  the first refresh.
+- **Conversation**: the 30 most recent messages, starting below the header, with the chat's photo in the
+  header and sender names in groups. Videos, stickers, documents, locations, contacts and polls show a
+  marker ("Video", "Document: …"); service messages (joins, title changes) are left out.
+- **Photos**: Enter on a photo opens its menu with **View** first. View downloads the photo and shows it
+  full screen on the dark window background, with a loader while it downloads and an error with
+  **Try again** if it fails. Back returns to the same bubble.
+- **Voice messages**: the bubble shows the length; Enter plays or pauses, with the position and a progress
+  bar. The audio is downloaded on the first play. Telegram voice notes are OGG/Opus, which `<audio>` plays
+  in GeckoView and in Chromium. One message plays at a time; playback stops when the conversation closes.
+  Because Enter plays, voice messages have no reaction/reply menu.
+- **Reactions**: shown only as a badge under the bottom-right corner of the message (the emojis and, from 2
+  on, the count). Telegram keeps reactions on the message itself (`messageReactions`), so they are never a
+  bubble. Your own reaction shows at once; choosing it again removes it.
+- **Allowed reactions**: the menu offers 👍 ❤️ 😂 😭, adjusted to what the chat accepts
+  (`available_reactions` of the group or channel; Telegram's standard set otherwise, from
+  `messages.getAvailableReactions`). When a chat does not accept one, its substitute is used (😂 → 🤣 or 😁,
+  😭 → 😢). If no substitute fits, the item is disabled and reads "… is not allowed in this chat". A chat
+  with reactions turned off shows all four disabled and the toast "Reactions are off in this chat".
+- **Previews**: the newest message. A reaction is never previewed as a message. When someone else's unread
+  reaction is the newest thing on your last message, the row reads `Reacted ❤️ to “…”`, with the sender's
+  first name in groups.
+- **Conversation actions**: a bottom rail with Reply, and Voice and Photos disabled (web apps have no
+  microphone or media access).
+- **Reply**: the text field (the toolkit's `InputTextView`) appears only after Reply, as its own history
+  entry, so Back closes it and focus returns to Reply. On the glasses, Enter on the field opens the
+  platform's dictation composer. Right then moves to Send. After sending, the field closes.
+- **Message menu**: View (photos), the four reactions, and Reply, which opens the field quoting that
+  message. Replies are sent with Telegram's native `reply_to`.
+- **Read state**: opening a chat marks it read up to its newest incoming message (`markAsRead`, which uses
+  `messages.readHistory` or `channels.readHistory`).
+- **Updates**: Telegram pushes updates over the open connection. A new message, edit, deletion, reaction or
+  read in a chat refreshes it (and the list) within half a second. Polling covers missed updates: the open
+  conversation every 10 s, and the list every 20 s. Polling pauses while the page is hidden.
+- **Language**: English by default; Portuguese (pt-BR wording) for any `pt-*` `navigator.language`,
+  including the glasses' `pt-PT`. All UI strings are in `src/i18n/strings.ts`.
+
+## Controls
+
+The app uses only arrow keys, Enter, and Escape (the Neural Band / Rokid gestures).
+
+| Where | Key | Action |
+|---|---|---|
+| Chats | Up / Down | Move between chats |
+| Chats | Enter | Open the chat |
+| Chats | Escape | Not handled by the app, so the platform closes it |
+| Conversation | Up / Down | Move between the message bubbles (scrolls history) and the action rail |
+| Conversation | Down, Left | Always ends on Reply (on entry, focus is on Reply or on the newest bubble) |
+| Conversation | Enter on Reply | Opens the reply field, focused |
+| Reply field | Enter | On the glasses: opens the platform's dictation composer. In a desktop browser: sends |
+| Reply field | Right, then Enter | Send; the field closes |
+| Reply field | Escape | Closes the field, back to Reply |
+| Conversation | Enter on a bubble | Opens the message menu |
+| Conversation | Enter on a voice message | Plays / pauses it |
+| Message menu | Left / Right, Enter | View (photos), a reaction, or Reply (quoted reply) |
+| Message menu | Escape | Closes the menu, back to the bubble |
+| Photo | Escape | Back to the conversation, on the same bubble |
+| Conversation | Escape | Back to the chat list, with the same chat focused |
+| Error screens | Enter on "Try again" | Connects again |
+| Setup screen | Enter on "Check again" | Reads the configuration again |
+
+## Connecting a Telegram account
+
+The app needs three values, filled in on the phone companion (Lumen app → Apps → Telegram):
+
+```json
+"lumen_config": [
+  {"key": "telegram.apiId", "label": "API ID (my.telegram.org)", "type": "text"},
+  {"key": "telegram.apiHash", "label": "API hash (my.telegram.org)", "type": "secret"},
+  {"key": "telegram.session", "label": "Session (npm run login)", "type": "secret"},
+  {"key": "demo", "label": "Demo mode (screenshots)", "type": "text", "optional": true}
+],
+"lumen_internet": true
+```
+
+1. **API ID and hash.** Sign in at [my.telegram.org](https://my.telegram.org) → *API development tools*
+   and create an application (any title, platform "Other"). Telegram shows the `api_id` (a number) and the
+   `api_hash` (32 letters and digits). See [Obtaining api_id](https://core.telegram.org/api/obtaining_api_id).
+2. **Session.** On a computer with Node 22: clone this repository, `npm ci`, then `npm run login`. It asks
+   for the API ID and hash, the phone number, the code Telegram sends to your other devices, and the 2FA
+   password if the account has one. It prints a session string, one line of a few hundred characters.
+   Nothing is written to disk.
+3. In the Lumen app, paste the three values and save. The glasses connect at once; if the app is open, the
+   change applies without reopening it.
+
+The session is **full access to the account**. Keep it only in the Lumen companion; the app reads it from
+`window.lumen.config` and holds it in memory, never in localStorage. To revoke it, open Telegram → Settings
+→ Devices and end "Rokid Lumen". After that the glasses show "Session not accepted", and you run
+`npm run login` again.
+
+At runtime the app calls `await window.lumen.config.get()` and subscribes with
+`window.lumen.config.onChange(cb)`; see `src/config/lumenConfig.ts`.
+
+- If any field is missing, the app shows the **Setup** screen, which names the missing fields.
+- A malformed API ID, API hash or session shows **Invalid …**, naming the field.
+
+### Demo mode
+
+The field is marked `"optional": true`, so the companion does not ask for it (older Lumen versions ignore
+the flag). For screenshots and videos, set **Demo mode (screenshots)** to exactly `demo-captures`
+(surrounding spaces are ignored; any other value is ignored). The account fields can stay filled in. The
+change applies at once, even with the app open. Clear the field to go back to the account.
+
+In demo mode:
+
+- the chats come from `src/demo/demoData.ts`, fictional and in English. Phone numbers use the
+  555-0100–0199 range reserved for fiction, and the newest message is at 09:41 "today";
+- `src/demo/demoClient.ts` serves them through the same `ChatApi` as the Telegram client. It never opens a
+  connection, and GramJS is not even loaded. Sending takes 0.6 s; Maya Chen and Sam Rivera answer your
+  first reply once, after about 2.5 s, delivered as a push update;
+- it covers stacked reactions (Hike Crew), a reaction on your message (Maya), a reaction preview (Sam),
+  allowed reactions (🤣 for 😂 everywhere; 😢 for 😭 in Hike Crew; a channel, Library News, with reactions
+  off), profile photos and fallbacks (initials for Jordan Lee, an icon and a number for the unknown
+  contact), two photos to View, a 6 s voice note, a poll, a document and a location;
+- pictures and the voice note are generated by `scripts/generate-demo-media.mjs` (abstract shapes, dark
+  backgrounds for the additive display, a synthesized tone melody in OGG/Opus) and ship in the package;
+- the app reads and writes no storage, and every launch starts from the same unread chats;
+- the copy is in English whatever the device language.
+
+The only request outside the package origin is the Toolkit's Noto Sans stylesheet
+(`fonts.googleapis.com`), which `<App>` adds in both modes.
+
+### Development fallback
+
+When `window.lumen` does not exist (a regular browser), the app reads
+`?telegram.apiId=…&telegram.apiHash=…&telegram.session=…` (or `?demo=demo-captures`). It keeps the values in
+memory for that page load only and removes them from the address bar.
+
+## Telegram over MTProto (GramJS)
+
+Checked against the Telegram documentation and measured from this sandbox in headless Chromium and Firefox
+(see `tests/live/transport.mjs`):
+
+- **Transport.** WebSocket: `wss://<dc>.web.telegram.org/apiws` on port 443, subprotocol `binary`
+  ([transports](https://core.telegram.org/mtproto/transports)). The app forces `useWSS: true`; GramJS's
+  default on an `http://` page would be `ws://` on port 80. A desktop login stores the DC's IP address in
+  the session, which has no TLS certificate, so the app swaps it for the DC's web host (`pluto`, `venus`,
+  `aurora`, `vesta`, `flora`), keeping the key.
+- **GramJS in the browser.** GramJS is written for Node, so the build adapts it:
+  - `vite.config.ts` aliases `crypto` to GramJS's own browser crypto and `path` to `path-browserify`;
+  - `os`, `util`, `fs`, `net` and `socks` go to small stand-ins in `shims/`, and so do the parts the app
+    never uses (`htmlparser2` for the HTML parse mode, and the `mime` type database);
+  - `src/telegram/polyfills.ts` installs `Buffer` and `process`.
+
+  GramJS is a separate chunk (~166 KB gzip) loaded with a dynamic import only when an account is
+  configured. The first load stays around 224 KB gzip, and demo mode never loads it.
+- **Session refused.** When Telegram does not know a session's key, it closes the WebSocket and GramJS keeps
+  reconnecting. After a 20 s connect timeout the app opens one plain WebSocket to the DC. If it opens, the
+  server is reachable, so the session was refused: "Session not accepted" (`AUTH_KEY_UNKNOWN`). Otherwise
+  the network is down. `AUTH_KEY_UNREGISTERED`, `SESSION_REVOKED`, `USER_DEACTIVATED*` and `API_ID_INVALID`
+  also map to "Session not accepted"; `FLOOD_WAIT_n` to "Too many requests" (wait n s).
+- **Calls used.** `messages.getDialogs`, `messages.getHistory`, `messages.sendMessage` (with `reply_to`),
+  `messages.sendReaction`, `messages.readHistory` / `channels.readHistory`, `messages.getFullChat` /
+  `channels.getFullChannel` (`available_reactions`), `messages.getAvailableReactions`,
+  `upload.getFile` (photos, voice notes, profile photos), and the update stream.
+
+### Errors
+
+| Condition | Screen |
+|---|---|
+| Telegram unreachable (offline, DNS, TLS, proxy, timeout) | "Can't reach Telegram" |
+| Session or API ID refused | "Session not accepted" (with Telegram's error code) |
+| `FLOOD_WAIT_n` | "Too many requests" |
+| Other errors | "Telegram error" |
+| Malformed configuration | "Invalid API ID / API hash / Session" |
+
+The phone's internet can take 5–15 s to come up after launch. On the first load, network failures are
+retried every 3 s for up to 30 s while the header shows the **Loading…** spinner, over the cached list
+when there is one. Only after that does it show the network error; with a cached list, the list stays and
+the header shows **Offline** instead. A refused session stops at once, with no 30 s wait.
+
+After the first load, a failed refresh keeps the data on screen, shows "Connection lost. Retrying…", and
+marks the header **Offline** until a refresh succeeds.
+
+### Known limitations and risks
+
+- **MRBD quality gate: JavaScript budget.** The gate adds up every script in the package against the
+  300 KB first-load budget. App and Toolkit (~224 KB gzip) plus the GramJS chunk (~166 KB) come to
+  ~389 KB, so that check fails, although GramJS loads only after the first screen and only for a real
+  account. All other checks pass (run on a copy without the GramJS chunk).
+
+  What cannot be cut without breaking MTProto:
+  - the Telegram type schema (~40 KB gzip);
+  - pako (`gzip_packed` replies);
+  - big-integer;
+  - Buffer.
+
+  Even trimming the schema's unused methods would save ~17 KB at most. Meeting the budget needs a bridge
+  server (TDLib or GramJS on a server) that the app reaches over HTTPS, the way lumen-whatsapp reaches
+  Evolution. The session would then live on that server.
+
+- **WebSocket through the phone's proxy (to measure on the glasses).** In this sandbox, through a local
+  HTTP CONNECT proxy:
+  - Chromium completed the MTProto handshake and a call;
+  - Firefox's first WebSocket through the proxy failed in every run, and the GramJS retry succeeded.
+
+  The app retries (GramJS 5 times, then the 30 s window). Whether GeckoView 156 sends `wss` through the
+  Lumen proxy is still untested.
+- **No HTTP transport fallback.** Telegram's HTTP transport (`https://<dc>.web.telegram.org/apiw`) answers
+  CORS with `Access-Control-Allow-Origin: *`, so a browser could use it. GramJS has no HTTP transport,
+  though, and adding one means sending `http_wait` with every request to receive results and updates
+  ([service messages](https://core.telegram.org/mtproto/service_messages)). That is not in 0.1.0.
+- **GramJS is archived.** `telegram@2.26.22` is pinned; npm marks the package as archived, with
+  [teleproto](https://www.npmjs.com/package/teleproto) as the maintained fork. teleproto dropped GramJS's
+  browser dependencies and has not been tried in a browser here.
+- **Profile photos** are downloaded once per session (two at a time) and kept in memory, not stored.
+- **Media**: only photos (View) and voice/audio messages (play) are downloaded. Videos, stickers and
+  documents keep their marker. Downloads live in memory for the session (the last 6).
+- **Secure context.** GramJS relies on Web Crypto; `http://127.0.0.1` (how the Lumen host serves packages)
+  is a secure context in Chromium and Firefox.
+- **Channels** are read-only for most users: Reply returns "Not sent: not allowed in this chat".
+
+## Development
+
+```sh
+npm ci
+npm run dev           # http://localhost:5173/?demo=demo-captures (or the telegram.* parameters)
+npm run login         # creates a session (see above)
+npm run media         # regenerates the demo pictures and voice note (needs ffmpeg with libopus)
+npm run icons         # regenerates the app icon
+```
+
+## Build and package
+
+```sh
+npm run build         # typecheck + production build into dist/
+npm run package       # build + dist/lumen-telegram.mrbd.zip
+```
+
+The `.mrbd.zip` is the contents of `dist/` at the zip root. The manifest `id` is `cloud.bynd.lumen.telegram`.
+`scripts/package-offline.mjs` fails the build in any of these cases:
+- the manifest lacks `id`, the `lumen_config` keys, `lumen_internet: true`, a `version` equal to
+  `package.json`'s, or a square PNG icon ≥ 192 px;
+- the API hash or the session is not a `secret` field;
+- any script contains the E2E fake Telegram.
+
+The build targets Chromium 95 (the system WebView) and Firefox 115+ (GeckoView is Firefox 156).
+
+## Tests
+
+```sh
+npm test                                          # unit tests
+npx playwright install chromium firefox           # once
+npm run package && npm run build:e2e && npm run test:e2e
+npm run test:live                                 # needs internet; LIVE_PROXY=1 adds a CONNECT proxy
+```
+
+- **Unit tests** (`tests/unit`):
+  - configuration parsing, and credentials kept out of storage;
+  - MTProto → app conversion with real GramJS `Api` objects: every media kind, reactions, recent
+    reactions, dialogs;
+  - error mapping;
+  - allowed-reaction choice and toggling, and list previews;
+  - the demo client (no connection, allowed reactions, auto-reply with a push update).
+- **E2E** (`tests/e2e/run.mjs`, keyboard only, Chromium and Firefox). It serves two builds like the Lumen
+  host does:
+  - the **release build**: demo mode (the capture script key by key, with every outside request
+    recorded, storage seeded with sentinel data and checked unchanged, pt-PT forced to English), the
+    Setup and Invalid screens, the unzipped `.mrbd.zip` with every other origin blocked, and a real
+    account start with Telegram unreachable (GramJS chunk loaded, `wss://…/apiws` attempted, "Can't reach
+    Telegram" after the 30 s window);
+  - an **E2E build** (`npm run build:e2e`), in which `tests/e2e/fakeTelegram.ts` replaces the GramJS
+    connection, for the account flows: list, previews, photos and fallbacks, thread, dictated reply,
+    `reply_to`, reactions (badge, toggle, allowed set, reactions off), read marking, push updates and the
+    polling fallback, photo View/Back/failure, voice playback, Session not accepted, flood wait, the
+    connection coming up late, Offline and back, the cached launch (and no credential in storage), the
+    `window.lumen.config` contract, and pt-PT.
+- **Live** (`tests/live/transport.mjs`): the release build against Telegram's servers, with a random
+  session and no account.
+
+CI (`.github/workflows/ci.yml`) runs the unit tests, the package, the E2E build and the E2E suite, and
+uploads the `.mrbd.zip` and the screenshots. A separate job runs the live check without failing the build.
+
+Headless browsers do not replace a test on the glasses (GeckoView, the proxy, the dictation composer, the
+Back gesture).
