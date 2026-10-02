@@ -13,6 +13,7 @@ import voiceNote from '../../src/demo/assets/voice-note.ogg';
 import type {TelegramConfig} from '../../src/config/lumenConfig';
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from '../../src/telegram/api';
 import {sameEmoji} from '../../src/telegram/convert';
+import {decodeWaveform} from '../../src/telegram/waveform';
 import type {AllowedReactions, Chat, ChatMessage, MessageContent, ReactionSummary} from '../../src/telegram/model';
 
 type Init = {connect?: 'ok' | 'auth' | 'network' | 'flood'; downForMs?: number; push?: boolean; mediaFails?: boolean};
@@ -23,6 +24,8 @@ type FakeChat = Omit<Chat, 'lastMessage' | 'timestamp'> & {messages: FakeMessage
 type Log = {
   connects: number;
   sent: {chatId: string; text: string; replyToId: string | null}[];
+  /** Voice notes sent: size, first bytes ("OggS"), seconds, waveform values. */
+  voice: {chatId: string; bytes: number; head: string; seconds: number; waveform: number[]}[];
   reactions: {chatId: string; messageId: string; emoji: string | null}[];
   reads: {chatId: string; maxId: string}[];
   mediaRequests: {chatId: string; messageId: string}[];
@@ -112,7 +115,7 @@ function createController() {
   const init = readInit();
   const chats = seed();
   const listeners = new Set<(update: ChatUpdate) => void>();
-  const log: Log = {connects: 0, sent: [], reactions: [], reads: [], mediaRequests: [], photoRequests: []};
+  const log: Log = {connects: 0, sent: [], voice: [], reactions: [], reads: [], mediaRequests: [], photoRequests: []};
   const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false};
 
   const chatFor = (chatId: string) => {
@@ -180,6 +183,20 @@ function createController() {
         async getMessages(chatId, limit) {
           await guard();
           return chatFor(chatId).messages.slice(-limit).map(copy);
+        },
+        async sendVoice(chatId, voice) {
+          await guard();
+          const seconds = Math.max(1, Math.round(voice.durationMs / 1000));
+          log.voice.push({
+            chatId,
+            bytes: voice.bytes.length,
+            head: String.fromCharCode(...voice.bytes.subarray(0, 4)),
+            seconds,
+            waveform: voice.waveform ? decodeWaveform(voice.waveform) : [],
+          });
+          const sent = msg(chatId, true, 0, {kind: 'audio', text: '', seconds}, null);
+          chatFor(chatId).messages.push(sent);
+          return copy(sent);
         },
         async sendText(chatId, text, replyToId) {
           await guard();

@@ -6,7 +6,9 @@ import {
 import {BrowserRouter, Navigate, Route, Routes} from 'react-router-dom';
 import {ChatListPage} from './pages/ChatListPage';
 import {PhotoPage} from './pages/PhotoPage';
+import {RecordPage} from './pages/RecordPage';
 import {ThreadPage} from './pages/ThreadPage';
+import {TranscriptPage} from './pages/TranscriptPage';
 
 // Back (Escape) is handled by ReactRouterNavigationProvider: from a photo it
 // returns to the conversation, in a thread to the list; on the list, with no history left, it is not consumed,
@@ -22,6 +24,8 @@ export default function TelegramApp() {
                 <Route path="/" element={<ChatListPage />} />
                 <Route path="/chat/:chatId" element={<ThreadPage />} />
                 <Route path="/chat/:chatId/photo/:messageId" element={<PhotoPage />} />
+                <Route path="/chat/:chatId/record" element={<RecordPage />} />
+                <Route path="/chat/:chatId/transcript/:messageId" element={<TranscriptPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             )}

@@ -7,6 +7,8 @@ export type LoadedMedia = {src: string; mimetype: string};
 
 export type MediaLoader = {
   load(message: ChatMessage): Promise<LoadedMedia>;
+  /** Keeps audio you just recorded, so playing your own voice note needs no download. */
+  prime(message: Pick<ChatMessage, 'chatId' | 'id'>, blob: Blob, mimetype: string): void;
   dispose(): void;
 };
 
@@ -81,6 +83,12 @@ export function createMediaLoader(api: ChatApi): MediaLoader {
         }
       }
       return pending;
+    },
+    prime(message, blob, mimetype) {
+      const key = `${message.chatId}:${message.id}`;
+      const src = URL.createObjectURL(blob);
+      objectUrls.set(key, src);
+      items.set(key, Promise.resolve({src, mimetype}));
     },
     dispose() {
       for (const url of objectUrls.values()) {

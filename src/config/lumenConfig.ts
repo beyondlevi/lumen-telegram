@@ -53,8 +53,12 @@ type LumenConfigApi = {
 };
 
 declare global {
+  /** What the Lumen host injects; other modules add their parts (e.g. `audio`). */
+  interface LumenHost {
+    config?: LumenConfigApi;
+  }
   interface Window {
-    lumen?: {config?: LumenConfigApi};
+    lumen?: LumenHost;
   }
 }
 

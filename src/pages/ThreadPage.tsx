@@ -24,7 +24,12 @@ import {displayEmoji} from '../telegram/convert';
 import {reactionOptions} from '../telegram/reactions';
 import {useAudioPlayer} from '../state/useAudioPlayer';
 import {useChat} from '../ChatProvider';
+import {recordPath} from './RecordPage';
 import {StatusPage} from './StatusPage';
+import {transcriptPath} from './TranscriptPage';
+
+/** Set when Voice opens the recording screen; read when the conversation shows again. */
+const returnToVoice = {pending: false};
 
 export function photoPath(chatId: string, messageId: string): string {
   return `/chat/${encodeURIComponent(chatId)}/photo/${encodeURIComponent(messageId)}`;
@@ -60,7 +65,7 @@ function useHeaderHeight(pageRef: {current: PageHandle | null}): number {
 }
 
 function Thread({chatId}: {chatId: string}) {
-  const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions} =
+  const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor} =
     useChat();
   const location = useLocation();
   const navigate = useNavigate();
@@ -80,6 +85,7 @@ function Thread({chatId}: {chatId: string}) {
   // Message chosen with the bubble menu's Reply; sent as a quoted reply.
   const [quoted, setQuoted] = useState<ChatMessage | null>(null);
   const replyButtonRef = useRef<ButtonHandle>(null);
+  const voiceButtonRef = useRef<ButtonHandle>(null);
   const pageRef = useRef<PageHandle>(null);
   const headerHeight = useHeaderHeight(pageRef);
 
@@ -115,6 +121,23 @@ function Thread({chatId}: {chatId: string}) {
   );
   const startReply = useCallback(() => openComposer(null), [openComposer]);
   const viewPhoto = useCallback((message: ChatMessage) => navigate(photoPath(chatId, message.id)), [chatId, navigate]);
+  const transcribe = useCallback((message: ChatMessage) => navigate(transcriptPath(chatId, message.id)), [chatId, navigate]);
+  const record = useCallback(() => {
+    returnToVoice.pending = true;
+    navigate(recordPath(chatId));
+  }, [chatId, navigate]);
+  // Back from the recording screen lands on Voice. Focus is restored by row
+  // position, which a just-sent voice note shifts by one, so set it here.
+  useEffect(() => {
+    if (!returnToVoice.pending || location.pathname !== `/chat/${encodeURIComponent(chatId)}`) {
+      return;
+    }
+    returnToVoice.pending = false;
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => voiceButtonRef.current?.getElement()?.focus({preventScroll: true}));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatId, location.key, location.pathname]);
 
   const react = useCallback(
     (message: ChatMessage, emoji: string) => {
@@ -237,6 +260,9 @@ function Thread({chatId}: {chatId: string}) {
               onReact={react}
               onReply={openComposer}
               onView={viewPhoto}
+              onTranscribe={transcribe}
+              transcribeAvailable={lumenAudio != null}
+              transcript={message.content.kind === 'audio' ? transcriptFor(message.id) : null}
               onToggleAudio={toggleAudio}
             />
           ))}
@@ -269,7 +295,14 @@ function Thread({chatId}: {chatId: string}) {
                 initialFocusEligible={messages.length === 0}
                 onClick={startReply}
               />
-              <Button title={t('voiceAction')} icon={microphoneFilled} disabled initialFocusEligible={false} />
+              <Button
+                ref={voiceButtonRef}
+                title={t('voiceAction')}
+                icon={microphoneFilled}
+                disabled={lumenAudio == null}
+                initialFocusEligible={false}
+                onClick={record}
+              />
               <Button title={t('photosAction')} icon={imageFilled} disabled initialFocusEligible={false} />
             </ButtonRail>
           )}

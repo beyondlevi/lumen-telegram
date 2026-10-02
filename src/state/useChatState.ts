@@ -8,6 +8,9 @@ import {connectClient} from '../telegram/connect';
 import {sameEmoji} from '../telegram/convert';
 import {withMyReaction} from '../telegram/reactions';
 import type {AllowedReactions, Chat, ChatMessage, ReactionSummary} from '../telegram/model';
+import {createDemoAudio} from '../audio/demoAudio';
+import {hostAudio, type LumenAudio, type LumenAudioResult} from '../audio/lumenAudio';
+import {encodeWaveform} from '../telegram/waveform';
 import {createAvatarLoader} from './avatars';
 import {loadChatCache, saveChatCache} from './chatCache';
 import {createMediaLoader, type LoadedMedia} from './media';
@@ -63,6 +66,13 @@ export type ChatState = {
   requestAvatar(chat: Chat | undefined): void;
   /** Downloads a photo or voice message on demand (kept in memory for the session). */
   loadMedia(message: ChatMessage): Promise<LoadedMedia>;
+  /** Microphone and transcription: the host's, the simulated one in demo mode, or null (not available). */
+  audio: LumenAudio | null;
+  /** Sends a recorded voice note; `levels` (0..1 during the recording) become its waveform. */
+  sendVoice(chatId: string, recording: LumenAudioResult, levels?: readonly number[]): Promise<void>;
+  /** Transcription of a message made this session, if any. */
+  transcriptFor(messageId: string): string | null;
+  saveTranscript(messageId: string, text: string): void;
   /** Chat order last shown by the list; kept across the list route's unmounts. */
   listOrder: {current: string[] | null};
 };
@@ -104,6 +114,8 @@ export function useChatState(): ChatState {
   const [readMarks, setReadMarks] = useState<ReadMarks>(loadReadMarks);
   const [allowed, setAllowed] = useState<Record<string, AllowedReactions>>({});
   const [avatarVersion, setAvatarVersion] = useState(0);
+  const [transcripts, setTranscripts] = useState<Record<string, string>>({});
+  const audio = useMemo(() => (config.status === 'demo' ? createDemoAudio() : hostAudio()), [config.status]);
   const allowedRef = useRef(allowed);
   allowedRef.current = allowed;
 
@@ -498,6 +510,40 @@ export function useChatState(): ChatState {
     [api],
   );
 
+  const sendVoice = useCallback(
+    async (chatId: string, recording: LumenAudioResult, levels: readonly number[] = []) => {
+      if (api == null) {
+        throw new TelegramError('network', 'Not connected');
+      }
+      const sent = await api.sendVoice(chatId, {
+        bytes: new Uint8Array(await recording.blob.arrayBuffer()),
+        mimetype: recording.mimeType,
+        durationMs: recording.durationMs,
+        ...(levels.length ? {waveform: encodeWaveform(levels)} : {}),
+      });
+      const message: ChatMessage = {...sent, chatId, pending: true};
+      media?.prime(message, recording.blob, recording.mimeType);
+      setThreads(previous => {
+        const current = previous[chatId] ?? {loaded: true, synced: true, messages: []};
+        return {...previous, [chatId]: {...current, messages: mergeThread(current.messages, [message])}};
+      });
+      setChats(previous => {
+        const existing = previous.find(chat => chat.id === chatId);
+        if (!existing) {
+          return previous;
+        }
+        const updated = {...existing, lastMessage: message, timestamp: message.timestamp};
+        return [updated, ...previous.filter(chat => chat.id !== chatId)];
+      });
+    },
+    [api, media],
+  );
+
+  const saveTranscript = useCallback(
+    (messageId: string, text: string) => setTranscripts(previous => ({...previous, [messageId]: text})),
+    [],
+  );
+
   const loadMedia = useCallback(
     (message: ChatMessage) =>
       media == null ? Promise.reject(new TelegramError('network', 'Not connected')) : media.load(message),
@@ -554,9 +600,13 @@ export function useChatState(): ChatState {
         }
       },
       loadMedia,
+      audio,
+      sendVoice,
+      transcriptFor: messageId => transcripts[messageId] ?? null,
+      saveTranscript,
       listOrder: listOrderRef,
     }),
     // avatarVersion: a photo finished loading.
-    [allowed, avatarVersion, avatars, chats, isUnread, loadMedia, offline, openThread, phase, reloadConfig, sendReaction, sendText, syncing, threads],
+    [allowed, audio, avatarVersion, avatars, chats, isUnread, loadMedia, offline, openThread, phase, reloadConfig, saveTranscript, sendReaction, sendText, sendVoice, syncing, threads, transcripts],
   );
 }

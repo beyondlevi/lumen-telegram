@@ -21,7 +21,16 @@ through WebSocket, with no server in between.
 - **Voice messages**: the bubble shows the length; Enter plays or pauses, with the position and a progress
   bar. The audio is downloaded on the first play. Telegram voice notes are OGG/Opus, which `<audio>` plays
   in GeckoView and in Chromium. One message plays at a time; playback stops when the conversation closes.
-  Because Enter plays, voice messages have no reaction/reply menu.
+  Enter on a voice message opens its menu: **Listen** (it reads **Pause** while playing), **Transcribe**,
+  the four reactions and Reply.
+- **Sending voice notes**: **Voice** opens the recording screen, which records through the Lumen host's
+  microphone API (see "Lumen audio API" below). Send uploads a native Telegram voice note:
+  - an OGG/Opus document with `documentAttributeAudio` (`voice=true`, the duration in seconds, and the
+    5-bit waveform);
+  - the waveform is built from the input levels of the recording (`src/telegram/waveform.ts`, 100
+    samples), so Telegram shows it as a voice message with its waveform;
+  - it is sent with GramJS `sendFile({voiceNote: true, attributes})` (`upload.saveFilePart` +
+    `messages.sendMedia`).
 - **Reactions**: shown only as a badge under the bottom-right corner of the message (the emojis and, from 2
   on, the count). Telegram keeps reactions on the message itself (`messageReactions`), so they are never a
   bubble. Your own reaction shows at once; choosing it again removes it.
@@ -33,8 +42,8 @@ through WebSocket, with no server in between.
 - **Previews**: the newest message. A reaction is never previewed as a message. When someone else's unread
   reaction is the newest thing on your last message, the row reads `Reacted ❤️ to “…”`, with the sender's
   first name in groups.
-- **Conversation actions**: a bottom rail with Reply, and Voice and Photos disabled (web apps have no
-  microphone or media access).
+- **Conversation actions**: a bottom rail with Reply, Voice (records a voice note when the host has
+  `window.lumen.audio`, disabled otherwise) and Photos (disabled).
 - **Reply**: the text field (the toolkit's `InputTextView`) appears only after Reply, as its own history
   entry, so Back closes it and focus returns to Reply. On the glasses, Enter on the field opens the
   platform's dictation composer. Right then moves to Send. After sending, the field closes.
@@ -64,7 +73,11 @@ The app uses only arrow keys, Enter, and Escape (the Neural Band / Rokid gesture
 | Reply field | Right, then Enter | Send; the field closes |
 | Reply field | Escape | Closes the field, back to Reply |
 | Conversation | Enter on a bubble | Opens the message menu |
-| Conversation | Enter on a voice message | Plays / pauses it |
+| Conversation | Enter on a voice message | Opens its menu: Listen/Pause, Transcribe, reactions, Reply |
+| Conversation | Enter on Voice | Opens the recording screen |
+| Recording | Enter on Send (initial focus) | Stops, sends, returns to the conversation on Voice |
+| Recording | Right, Enter (Discard) or Escape | Cancels without sending |
+| Transcript | Escape | Back to the voice message (the transcript stays under it) |
 | Message menu | Left / Right, Enter | View (photos), a reaction, or Reply (quoted reply) |
 | Message menu | Escape | Closes the menu, back to the bubble |
 | Photo | Escape | Back to the conversation, on the same bubble |
@@ -165,7 +178,11 @@ Checked against the Telegram documentation and measured from this sandbox in hea
 - **Calls used.** `messages.getDialogs`, `messages.getHistory`, `messages.sendMessage` (with `reply_to`),
   `messages.sendReaction`, `messages.readHistory` / `channels.readHistory`, `messages.getFullChat` /
   `channels.getFullChannel` (`available_reactions`), `messages.getAvailableReactions`,
-  `upload.getFile` (photos, voice notes, profile photos), and the update stream.
+  `upload.getFile` (photos, voice notes, profile photos), `upload.saveFilePart` + `messages.sendMedia`
+  (voice notes: `inputMediaUploadedDocument`, `audio/ogg`, `documentAttributeAudio` voice/duration/
+  waveform; see [documentAttributeAudio](https://core.telegram.org/constructor/documentAttributeAudio) and
+  [files](https://core.telegram.org/api/files)), and the update stream. Transcription uses the Lumen host;
+  `messages.transcribeAudio` (Telegram Premium) is not used.
 
 ### Errors
 
@@ -222,6 +239,52 @@ marks the header **Offline** until a refresh succeeds.
 - **Secure context.** GramJS relies on Web Crypto; `http://127.0.0.1` (how the Lumen host serves packages)
   is a secure context in Chromium and Firefox.
 - **Channels** are read-only for most users: Reply returns "Not sent: not allowed in this chat".
+
+## Lumen audio API (voice notes and transcription)
+
+On the Rokid glasses `getUserMedia` is muted for apps, so the app never uses `getUserMedia` or
+`MediaRecorder`. The phone captures the glasses' microphone and transcribes, and the Lumen host exposes
+that as `window.lumen.audio` (`src/audio/lumenAudio.ts`):
+
+```ts
+interface LumenAudio {
+  record(options?: {maxMs?: number}): Promise<LumenRecording>;      // the app asks for 120000 (2 min)
+  transcribe(audio: Blob, options?: {language?: string; onPartial?: (text: string) => void;
+    signal?: AbortSignal}): Promise<{text: string}>;
+}
+interface LumenRecording {
+  onLevel: ((level: number, elapsedMs: number) => void) | null;  // ~5 times a second
+  onEnd: ((reason: 'max' | 'error', result?: LumenAudioResult, error?: Error) => void) | null;
+  stop(): Promise<LumenAudioResult>;                               // {blob, mimeType, durationMs}
+  cancel(): void;
+}
+// Rejections carry .code: busy, no-phone, unavailable, too-large, unsupported-format, no-speech,
+// engine (with .message), cancelled, timeout.
+```
+
+- **Feature detection**: the API is used only when `window.lumen.audio` has `record` and `transcribe`.
+  On older hosts, **Voice** stays disabled and **Transcribe** is shown disabled ("not available on this
+  device").
+- **Recording screen** (`/chat/:id/record`, its own history entry):
+  - shows the elapsed time, a microphone level bar (from `onLevel`) and **Send** (initial focus) /
+    **Discard**;
+  - Send stops and sends; Discard or Back cancels without sending;
+  - at 2:00 the host ends the recording (`onEnd('max', result)`), and the screen says so and keeps
+    Send / Discard;
+  - while sending, a spinner; then the Toast "Voice message sent", and the conversation shows the note,
+    playable at once from memory;
+  - host errors show a message with **Try again**.
+- **Transcription screen** (`/chat/:id/transcript/:messageId`, Back closes):
+  - downloads the voice note like Listen, calls `transcribe`, and shows the partial text live, then the
+    final text;
+  - the transcript is kept in memory for the session (opening it again is instant) and also shows under
+    the voice bubble;
+  - errors (busy, no-phone, too-large, no-speech, engine, …) have their own message and **Try again**;
+  - Back aborts a running transcription (`signal`).
+- **Demo mode** uses a simulated `window.lumen.audio` (`src/audio/demoAudio.ts`):
+  - an animated level while recording, and the packaged demo voice note as the recording;
+  - a fixed English transcript delivered word by word;
+  - no microphone, no network, no storage.
 
 ## Development
 
@@ -283,6 +346,16 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
 
 CI (`.github/workflows/ci.yml`) runs the unit tests, the package, the E2E build and the E2E suite, and
 uploads the `.mrbd.zip` and the screenshots. A separate job runs the live check without failing the build.
+
+Voice notes and transcription (`tests/e2e/fakeAudio.mjs` injects a scripted `window.lumen.audio`, in
+Chromium and Firefox):
+- recording, Send, Discard, Back and the 2-minute limit (`maxMs: 120000`, `onEnd('max')`);
+- the voice note sent with its length and 100-sample waveform (checked on the scripted Telegram); a unit test runs the real GramJS `sendFile` with the network replaced and checks the upload and the `documentAttributeAudio`;
+- the `busy` and `no-phone` errors and Try again;
+- the voice menu (Listen, Pause, Transcribe);
+- transcription: partials, the kept transcript, an `engine` error and Try again;
+- Voice and Transcribe disabled without the API;
+- the demo capture script records, sends and transcribes with the simulated API.
 
 Headless browsers do not replace a test on the glasses (GeckoView, the proxy, the dictation composer, the
 Back gesture).

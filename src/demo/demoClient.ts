@@ -8,6 +8,7 @@ import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from '.
 import {sameEmoji} from '../telegram/convert';
 import {withMyReaction} from '../telegram/reactions';
 import type {AllowedReactions, Chat, ChatMessage} from '../telegram/model';
+import voiceNote from './assets/voice-note.ogg';
 import {DEMO_DAY_END, DEMO_STANDARD_REACTIONS, demoChats, type DemoChat, type DemoMessage} from './demoData';
 
 /** Time the "Sending" state stays on screen. */
@@ -107,6 +108,19 @@ export function createDemoClient(): ChatApi {
     async getMessages(chatId, limit) {
       const chat = chatFor(chatId);
       return chat.messages.slice(-limit).map(message => toModel(chat, message));
+    },
+
+    async sendVoice(chatId, voice) {
+      await wait(SEND_DELAY_MS);
+      const chat = chatFor(chatId);
+      // The demo "recording" is the packaged voice note.
+      const sent = add(chat, {
+        fromMe: true,
+        senderName: null,
+        content: {kind: 'audio', text: '', seconds: Math.max(1, Math.round(voice.durationMs / 1000))},
+        media: {url: voiceNote, mimetype: 'audio/ogg'},
+      });
+      return toModel(chat, sent);
     },
 
     async sendText(chatId, value) {

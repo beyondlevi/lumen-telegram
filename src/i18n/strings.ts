@@ -104,6 +104,40 @@ const en = {
   audioPaused: 'Paused, {position} of {duration}',
   audioLoading: 'Loading audio',
   audioFailed: "Couldn't play the audio: {reason}",
+
+  listenAction: 'Listen',
+  pauseAction: 'Pause',
+  transcribeAction: 'Transcribe',
+  transcribeUnavailable: 'Transcribe (not available on this device)',
+
+  recordingHeader: 'Recording',
+  recordingLabel: 'Voice message recording',
+  recordingStarting: 'Starting the microphone…',
+  recordingNow: 'Recording',
+  recordingLimit: 'Reached the {limit} limit',
+  recordingLevel: 'Microphone level',
+  recordingSending: 'Sending',
+  recordingFailedTitle: "Couldn't record",
+  sendVoiceAction: 'Send',
+  discardAction: 'Discard',
+  voiceSent: 'Voice message sent',
+  voiceFailed: 'Not sent: {reason}',
+
+  transcriptHeader: 'Transcript',
+  transcriptLabel: 'Transcript of a voice message from {name}',
+  transcribing: 'Transcribing…',
+  transcriptFailedTitle: "Couldn't transcribe",
+  transcriptEmpty: 'No words were recognized.',
+
+  audioBusy: 'The microphone is busy with another recording or dictation. Try again in a moment.',
+  audioNoPhone: 'The glasses are not connected to the phone.',
+  audioUnavailable: 'The phone could not use the glasses microphone.',
+  audioTooLarge: 'This audio is too long to transcribe (over 5 minutes or 5 MB).',
+  audioUnsupported: "This audio format can't be transcribed.",
+  audioNoSpeech: 'No speech was found in this audio.',
+  audioEngine: 'The transcription engine failed: {message}',
+  audioTimeout: 'The phone took too long to answer.',
+  audioOther: 'Something went wrong: {message}',
 };
 
 export type StringKey = keyof typeof en;
@@ -212,6 +246,40 @@ const pt: Strings = {
   audioPaused: 'Pausado, {position} de {duration}',
   audioLoading: 'Carregando áudio',
   audioFailed: 'Não foi possível tocar o áudio: {reason}',
+
+  listenAction: 'Ouvir',
+  pauseAction: 'Pausar',
+  transcribeAction: 'Transcrever',
+  transcribeUnavailable: 'Transcrever (indisponível neste aparelho)',
+
+  recordingHeader: 'Gravando',
+  recordingLabel: 'Gravação de mensagem de voz',
+  recordingStarting: 'Ligando o microfone…',
+  recordingNow: 'Gravando',
+  recordingLimit: 'Chegou ao limite de {limit}',
+  recordingLevel: 'Nível do microfone',
+  recordingSending: 'Enviando',
+  recordingFailedTitle: 'Não foi possível gravar',
+  sendVoiceAction: 'Enviar',
+  discardAction: 'Descartar',
+  voiceSent: 'Mensagem de voz enviada',
+  voiceFailed: 'Não enviada: {reason}',
+
+  transcriptHeader: 'Transcrição',
+  transcriptLabel: 'Transcrição de uma mensagem de voz de {name}',
+  transcribing: 'Transcrevendo…',
+  transcriptFailedTitle: 'Não foi possível transcrever',
+  transcriptEmpty: 'Nenhuma palavra reconhecida.',
+
+  audioBusy: 'O microfone está ocupado com outra gravação ou ditado. Tente de novo daqui a pouco.',
+  audioNoPhone: 'Os óculos não estão conectados ao celular.',
+  audioUnavailable: 'O celular não conseguiu usar o microfone dos óculos.',
+  audioTooLarge: 'Este áudio é longo demais para transcrever (mais de 5 minutos ou 5 MB).',
+  audioUnsupported: 'Este formato de áudio não pode ser transcrito.',
+  audioNoSpeech: 'Nenhuma fala encontrada neste áudio.',
+  audioEngine: 'O motor de transcrição falhou: {message}',
+  audioTimeout: 'O celular demorou demais para responder.',
+  audioOther: 'Algo deu errado: {message}',
 };
 
 const dictionaries = {en, pt} satisfies Record<string, Strings>;

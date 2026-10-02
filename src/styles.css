@@ -169,3 +169,29 @@ body {
   max-block-size: 100%;
   object-fit: contain;
 }
+
+.record-panel {
+  align-items: center;
+  text-align: center;
+}
+
+.record-panel > * {
+  max-inline-size: 100%;
+}
+
+.audio-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--uit-spacing-small);
+  min-inline-size: 0;
+}
+
+.audio-transcript {
+  overflow-wrap: anywhere;
+}
+
+.transcript-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--uit-spacing-small);
+}

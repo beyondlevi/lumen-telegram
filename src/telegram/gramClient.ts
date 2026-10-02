@@ -4,13 +4,15 @@
 // demo and the first screen do not download it.
 import './polyfills';
 import bigInt from 'big-integer';
+import {Buffer} from 'buffer';
 import {Api, TelegramClient, utils} from 'telegram';
 import type {Entity} from 'telegram/define';
 import {Raw} from 'telegram/events';
 import {LogLevel} from 'telegram/extensions/Logger';
+import {CustomFile} from 'telegram/client/uploads';
 import {StringSession} from 'telegram/sessions';
 import type {TelegramConfig} from '../config/lumenConfig';
-import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from './api';
+import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload, type VoiceNote} from './api';
 import {entityName, reactionsOf, toChat, toMessage, type Tl} from './convert';
 import {toTelegramError} from './errors';
 import type {AllowedReactions, Chat, ChatMessage} from './model';
@@ -111,6 +113,27 @@ function toBytes(value: unknown): Uint8Array | null {
     return new Uint8Array(value);
   }
   return null;
+}
+
+/**
+ * Sends a native voice note: an OGG/Opus document with documentAttributeAudio
+ * voice=true, its length and the 5-bit waveform, so Telegram shows the
+ * waveform and plays it inline.
+ */
+export function sendVoiceNote(client: TelegramClient, entity: Entity | Api.TypeInputPeer, voice: VoiceNote): Promise<Api.Message> {
+  const buffer = Buffer.from(voice.bytes);
+  return client.sendFile(entity, {
+    file: new CustomFile('voice.ogg', buffer.length, '', buffer),
+    voiceNote: true,
+    attributes: [
+      new Api.DocumentAttributeAudio({
+        voice: true,
+        duration: Math.max(1, Math.round(voice.durationMs / 1000)),
+        ...(voice.waveform?.length ? {waveform: Buffer.from(voice.waveform)} : {}),
+      }),
+    ],
+    workers: 1,
+  });
 }
 
 /** Connects with the configured session; rejects with a TelegramError (auth/network/…). */
@@ -272,6 +295,16 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
         }
         return message;
       }),
+
+    sendVoice: (chatId, voice) =>
+      call(async () => {
+        const sent = await sendVoiceNote(client, await entityFor(chatId), voice);
+        const message = toMessage(sent, {chatId});
+        if (!message) {
+          throw new TelegramError('server', 'Telegram did not return the sent voice note');
+        }
+        return message;
+      }, MEDIA_TIMEOUT_MS),
 
     sendReaction: (chatId, messageId, emoji) =>
       call(async () => {
