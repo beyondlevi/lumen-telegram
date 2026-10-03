@@ -74,6 +74,7 @@ The app uses only arrow keys, Enter, and Escape (the Neural Band / Rokid gesture
 | Chats | Enter | Open the chat |
 | Chats | Escape | Not handled by the app, so the platform closes it |
 | Conversation | Up / Down | Move between the message bubbles (scrolls history) and the action rail |
+| Conversation, on a message taller than the screen | Down / Up | Scroll through that message, half a screen per press, until its end (Down) or start (Up) is in view; the next press goes on to the next/previous message. A long message reached with Down opens at its start, with Up at its end |
 | Conversation | Down, Left | Always ends on Reply (on entry, focus is on Reply or on the newest bubble) |
 | Conversation | Enter on Reply | Opens the reply field, focused |
 | Reply field | Enter | On the glasses: opens the platform's dictation composer. In a desktop browser: sends |
@@ -344,7 +345,8 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
     reactions, dialogs;
   - error mapping;
   - allowed-reaction choice and toggling, and list previews;
-  - the demo client (no connection, allowed reactions, auto-reply with a push update).
+  - the demo client (no connection, allowed reactions, auto-reply with a push update);
+  - where the list scrolls through a long message, step by step, in both directions.
 - **E2E** (`tests/e2e/run.mjs`, keyboard only, Chromium and Firefox). It serves two builds like the Lumen
   host does:
   - the **release build**: demo mode (the capture script key by key, with every outside request
@@ -357,7 +359,10 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
     `reply_to`, reactions (badge, toggle, allowed set, reactions off), read marking, push updates and the
     polling fallback, photo View/Back/failure, voice playback, Session not accepted, flood wait, the
     connection coming up late, Offline and back, the cached launch (and no credential in storage), the
-    `window.lumen.config` contract, and pt-PT.
+    `window.lumen.config` contract, pt-PT, and long messages (the first, the middle and the last of five are
+    taller than the screen: Down and Up scroll through each one before going on, the list never jumps on the
+    way, and the message menu keeps the reading place; `tests/e2e/longMessages.mjs`, shared with
+    lumen-whatsapp).
 - **Live** (`tests/live/transport.mjs`): the release build against Telegram's servers, with a random
   session and no account.
 

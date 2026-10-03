@@ -23,6 +23,7 @@ import type {ChatMessage} from '../telegram/model';
 import {displayEmoji} from '../telegram/convert';
 import {reactionOptions} from '../telegram/reactions';
 import {useAudioPlayer} from '../state/useAudioPlayer';
+import {useLongMessageScroll} from '../state/useLongMessageScroll';
 import {useChat} from '../ChatProvider';
 import {recordPath} from './RecordPage';
 import {StatusPage} from './StatusPage';
@@ -106,6 +107,8 @@ function Thread({chatId}: {chatId: string}) {
   const pageRef = useRef<PageHandle>(null);
   // Marks the end of the conversation (below the newest bubble and its time).
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const longMessages = useLongMessageScroll(listRef);
   const headerHeight = useHeaderHeight(pageRef);
 
   const showAudioError = useCallback(
@@ -182,12 +185,13 @@ function Thread({chatId}: {chatId: string}) {
         } else {
           focusNewestBubble(endRef.current?.parentElement);
         }
+        longMessages.release();
         endRef.current?.scrollIntoView({block: 'end'});
       });
     });
     return () => window.cancelAnimationFrame(frame);
     // Once per showing of the conversation; new messages are revealed below.
-  }, [chatId, location.key, location.pathname]);
+  }, [chatId, location.key, location.pathname, longMessages]);
 
   const react = useCallback(
     (message: ChatMessage, emoji: string) => {
@@ -226,10 +230,11 @@ function Thread({chatId}: {chatId: string}) {
       return;
     }
     if (!revealedRef.current || endVisibleRef.current || lastMessageFromMe) {
+      longMessages.release();
       endRef.current?.scrollIntoView({block: 'end'});
       revealedRef.current = true;
     }
-  }, [lastMessageId, lastMessageFromMe]);
+  }, [lastMessageId, lastMessageFromMe, longMessages]);
 
   const handleSend = useCallback(
     (text: string) => {
@@ -281,8 +286,10 @@ function Thread({chatId}: {chatId: string}) {
       {/* The conversation starts below the header so no message runs under it. */}
       <div
         className={headerHeight > 0 ? 'thread-shell thread-shell--below-header' : 'thread-shell'}
-        style={headerHeight > 0 ? ({'--thread-header-height': `${headerHeight}px`} as CSSProperties) : undefined}>
+        style={headerHeight > 0 ? ({'--thread-header-height': `${headerHeight}px`} as CSSProperties) : undefined}
+        {...longMessages.handlers}>
         <VerticalList
+          ref={listRef}
           insetForHeader={headerHeight === 0}
           contentClassName="message-list"
           ariaLabel={t('threadLabel', {name})}>

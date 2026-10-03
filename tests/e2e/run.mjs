@@ -24,6 +24,7 @@ import path from 'node:path';
 import {unzipSync} from 'fflate';
 import {chromium, firefox} from 'playwright';
 import {fakeAudioScript} from './fakeAudio.mjs';
+import {LONG_THREAD, longMessageScenario} from './longMessages.mjs';
 import {startStaticServer} from './static-server.mjs';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
@@ -902,6 +903,42 @@ async function voiceFlow(browser) {
 
 // ------------------------------------------------------------------ run
 
+const DIEGO = '1005';
+
+/** A conversation whose first, middle and last messages are taller than the screen. */
+async function longMessagesFlow(browser, label) {
+  const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
+  try {
+    await page.goto(`${FAKE_APP}/`);
+    await waitForText(page, 'Diego Alves');
+    await page.waitForTimeout(800);
+    // Diego's conversation becomes exactly the five test messages.
+    await fake(page, ({chatId, texts}) => {
+      window.__fakeTelegram.chatFor(chatId).messages.splice(0);
+      for (const text of texts) window.__fakeTelegram.incoming(chatId, text, 'Diego Alves');
+    }, {chatId: DIEGO, texts: LONG_THREAD});
+    await waitForText(page, 'LAST line 1');
+    await page.waitForTimeout(800);
+    for (let tries = 0; tries < 8 && !/^div\|Diego Alves, /.test(await activeLabel(page)); tries += 1) await press(page, 'ArrowUp');
+    for (let tries = 0; tries < 8 && !/^div\|Diego Alves, /.test(await activeLabel(page)); tries += 1) await press(page, 'ArrowDown');
+    await press(page, 'Enter');
+    await page.waitForURL(`**/chat/${DIEGO}`);
+    await waitForText(page, 'short two');
+    await page.waitForTimeout(1200);
+    await press(page, 'ArrowDown');
+    await press(page, 'ArrowLeft');
+    await page.waitForTimeout(600);
+    const steps = await longMessageScenario(page, {
+      screenshot: name => page.screenshot({path: path.join(outDir, `${label}-${name}.png`)}),
+      deliver: text => fake(page, ({chatId, value}) => window.__fakeTelegram.incoming(chatId, value, 'Diego Alves'), {chatId: DIEGO, value: text}),
+    });
+    console.log(`     scroll steps inside each long message: ${JSON.stringify(steps)}`);
+    assert.deepEqual(problems, []);
+  } finally {
+    await context.close();
+  }
+}
+
 async function run() {
   const releaseServer = await startStaticServer(path.join(root, 'dist'), 4173);
   const fakeServer = await startStaticServer(path.join(root, 'dist-e2e'), 4174);
@@ -923,6 +960,7 @@ async function run() {
           // The sandbox has no audio output for Firefox; it decodes but cannot play.
           await demoFlow(browser, name, APP, {audioOutput: name !== 'firefox'});
         });
+        await test(`[${name}] long messages (first, middle, last): Down/Up scroll through each before moving on`, () => longMessagesFlow(browser, name));
         await test(`[${name}] voice notes: record, send (waveform), discard, Back, 2-minute limit, busy/no-phone, transcribe (partials, kept, engine error)`, () => voiceFlow(browser));
         await test(`[${name}] setup screen without configuration`, async () => {
           const {context, page, problems} = await newPage(browser);
