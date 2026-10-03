@@ -24,6 +24,7 @@ import path from 'node:path';
 import {unzipSync} from 'fflate';
 import {chromium, firefox} from 'playwright';
 import {fakeAudioScript} from './fakeAudio.mjs';
+import {fakeSpeechScript, NO_NATIVE_SPEECH} from './fakeSpeech.mjs';
 import {LONG_THREAD, longMessageScenario} from './longMessages.mjs';
 import {startStaticServer} from './static-server.mjs';
 
@@ -185,9 +186,13 @@ function lumenScript(values, {seed = null, fakeInit = null} = {}) {
 /** The demo voice note in the E2E build, used as the scripted microphone's recording. */
 const VOICE_FILE = () => `/assets/${fs.readdirSync(path.join(root, 'dist-e2e/assets')).find(file => file.endsWith('.ogg'))}`;
 
-async function newPage(browser, {locale = 'en-US', values = null, seed = null, fakeInit = null, block = null, audio = false} = {}) {
+async function newPage(browser, {locale = 'en-US', values = null, seed = null, fakeInit = null, block = null, audio = false, speech = false} = {}) {
   const [width, height] = (process.env.E2E_VIEWPORT ?? '600x600').split('x').map(Number);
   const context = await browser.newContext({viewport: {width, height}, locale});
+  // Chromium has a recognizer of its own (Google's, online); the glasses have
+  // Lumen's. Tests get none, or the scripted one with speech: true.
+  await context.addInitScript(NO_NATIVE_SPEECH);
+  if (speech) await context.addInitScript(fakeSpeechScript());
   if (values) await context.addInitScript(lumenScript(values, {seed, fakeInit}));
   // The Lumen host's microphone/dictation API, scripted (see fakeAudio.mjs).
   if (audio) await context.addInitScript(fakeAudioScript(VOICE_FILE()));
@@ -281,6 +286,7 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
       assert.deepEqual(
         (await rowLabels(page)).map(row => row.split(', ').slice(0, 2).join(', ')),
         [
+          'Voice search, Say a name',
           'Maya Chen, Can you bring the projector?',
           'Hike Crew, Leo: Photo: Trail map',
           'Sam Rivera, Reacted ❤️ to “Sounds good',
@@ -455,6 +461,23 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
     });
     await step(['Escape', 'Escape'], 1500, null, async () => {
       assert.match(await activeLabel(page), /^div\|Library News, /);
+    });
+    // 13. Voice search, above the first chat: demo mode hears "Maia" (one
+    //     letter off) and lists Maya Chen first
+    for (let tries = 0; tries < 8 && !/Voice search/.test(await activeLabel(page)); tries += 1) {
+      await page.keyboard.press('ArrowUp');
+      await page.waitForTimeout(400);
+    }
+    await step(['Enter'], 1500, '28-voice-search-listening', async () => {
+      assert.match(new URL(page.url()).pathname, /^\/search$/);
+      assert.match(await page.evaluate(() => document.body.innerText), /Listening…[\s\S]*“Maia”/);
+    });
+    await step([], 2500, '29-voice-search-results', async () => {
+      assert.match(await activeLabel(page), /^div\|Maya Chen/);
+    });
+    await step(['Escape'], 1500, null, async () => {
+      assert.equal(new URL(page.url()).pathname, '/');
+      assert.match(await activeLabel(page), /Voice search/);
     });
     assert.equal(await escapeReachesHost(page), true, 'Escape on the list is left to the platform');
 
@@ -939,6 +962,215 @@ async function longMessagesFlow(browser, label) {
   }
 }
 
+const BRUNO = '1008';
+
+/** Says `plan` (see fakeSpeech.mjs) on the next recognition. */
+const willHear = (page, plan) => page.evaluate(next => (window.__speechControl.next = next), plan);
+
+async function searchState(page) {
+  return page.evaluate(() => document.body.innerText);
+}
+
+/** From the list's first chat: Up to Voice search, Enter. */
+async function openVoiceSearch(page) {
+  await waitForFocus(page, /^div\|Ana Souza, /);
+  await press(page, 'ArrowUp');
+  assert.match(await activeLabel(page), /Voice search/, 'one Up from the first chat reaches Voice search');
+  await press(page, 'Enter');
+  await page.waitForURL('**/search');
+}
+
+/** The result rows (titles and subtitles) of the voice search. */
+async function resultRows(page) {
+  return page.$$eval('[role="button"][aria-label]', elements => elements.map(element => element.getAttribute('aria-label')));
+}
+
+/** Voice search with SpeechRecognition, window.lumen.audio, fallbacks and errors (GramJS contacts through the fake). */
+async function voiceSearchFlow(browser, label) {
+
+  // No recognizer: no entry point.
+  {
+    const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
+    try {
+      await page.goto(`${FAKE_APP}/`);
+      await waitForText(page, 'Carla Dias');
+      await page.waitForTimeout(600);
+      assert.equal(await page.getByText('Voice search').count(), 0, 'hidden without speech recognition');
+      await press(page, 'ArrowUp');
+      assert.match(await activeLabel(page), /^div\|Ana Souza, /, 'Up from the first chat goes nowhere');
+      assert.deepEqual(problems, []);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // SpeechRecognition (Lumen's shim): partial text, a pause ends it, best match first.
+  const {context, page, problems} = await newPage(browser, {values: ACCOUNT, speech: true});
+  try {
+    await page.goto(`${FAKE_APP}/`);
+    await waitForText(page, 'Carla Dias');
+    await page.waitForTimeout(800);
+    assert.ok(await page.getByText('Voice search').count() >= 1, 'entry point shown');
+    await page.screenshot({path: path.join(outDir, `${label}-search-1-list.png`)});
+    await willHear(page, {text: 'Carla Diaz'});
+    await openVoiceSearch(page);
+    await waitForText(page, 'Listening…');
+    await waitForText(page, '“Carla”', 3000);
+    await page.waitForTimeout(200);
+    await page.screenshot({path: path.join(outDir, `${label}-search-2-listening.png`)});
+    await waitForFocus(page, /^div\|Carla Dias/, 6000);
+    const log = await page.evaluate(() => window.__speechLog);
+    assert.equal(log[0].op, 'start');
+    assert.equal(log[0].lang, 'en-US', 'the page language');
+    assert.equal(log[0].interimResults, true);
+    assert.match(await searchState(page), /“Carla Diaz”/, 'what was heard is shown');
+    await page.waitForTimeout(1500);
+    await page.screenshot({path: path.join(outDir, `${label}-search-3-results.png`)});
+    await press(page, 'Enter');
+    await page.waitForURL(`**/chat/${CARLA}`);
+    await waitForText(page, 'Me manda o endereço?');
+    await press(page, 'Escape');
+    await page.waitForURL(url => new URL(url).pathname === '/');
+    await waitForText(page, 'Chats');
+
+    // A contact without a chat (Bruno is only in the contacts): opens an empty conversation.
+    await page.waitForTimeout(800);
+    await willHear(page, {text: 'bruno lima'});
+    await pressUntil(page, 'ArrowUp', /Voice search/);
+    await press(page, 'Enter');
+    await waitForFocus(page, /^div\|Bruno Lima, Contact/, 6000);
+    await press(page, 'Enter');
+    await page.waitForURL(`**/chat/${BRUNO}`);
+    await page.waitForTimeout(1500);
+    await waitForText(page, 'Reply');
+    const contactScreen = await page.evaluate(() => document.body.innerText);
+    assert.match(contactScreen, /Bruno Lima[\s\S]*No recent messages/, `the contact's name over an empty conversation: ${contactScreen}`);
+    await page.screenshot({path: path.join(outDir, `${label}-search-4-contact.png`)});
+    // The first reply starts the chat, which then joins the list.
+    assert.match(await activeLabel(page), /Reply/);
+    await press(page, 'Enter');
+    await dictate(page, 'Oi Bruno');
+    await press(page, 'ArrowRight');
+    await press(page, 'Enter');
+    await waitForText(page, 'Message sent');
+    await page.waitForTimeout(800);
+    await press(page, 'Escape');
+    await page.waitForURL(url => new URL(url).pathname === '/');
+    await page.getByText('Bruno Lima').first().waitFor({state: 'visible', timeout: 12000});
+
+    // No accents, several results: Família first; Back returns to the list.
+    await page.waitForTimeout(800);
+    await willHear(page, {text: 'familia'});
+    await pressUntil(page, 'ArrowUp', /Voice search/);
+    await press(page, 'Enter');
+    await waitForFocus(page, /^div\|Família/, 6000);
+    await press(page, 'Escape');
+    await page.waitForURL(url => new URL(url).pathname === '/');
+
+    // No match, then Try again; Done ends the listening.
+    await page.waitForTimeout(800);
+    await willHear(page, {text: 'Zacarias'});
+    await pressUntil(page, 'ArrowUp', /Voice search/);
+    await press(page, 'Enter');
+    await waitForText(page, 'No chat or contact matches “Zacarias”', 6000);
+    await waitForFocus(page, /Try again/);
+    await page.screenshot({path: path.join(outDir, `${label}-search-5-no-match.png`)});
+    await willHear(page, {text: 'Diego', waitForStop: true});
+    await press(page, 'Enter');
+    await waitForText(page, '“Diego”', 3000);
+    await page.waitForTimeout(1200);
+    assert.match(await searchState(page), /Listening…/, 'keeps listening until Done');
+    assert.match(await activeLabel(page), /Done/);
+    await press(page, 'Enter');
+    await waitForFocus(page, /^div\|Diego Alves/, 6000);
+    assert.ok((await page.evaluate(() => window.__speechLog)).some(entry => entry.op === 'stop'), 'Done stops the recognizer');
+    // Search again from the results.
+    await willHear(page, {error: 'no-speech'});
+    await pressUntil(page, 'ArrowDown', /Search again/);
+    await press(page, 'Enter');
+    await waitForText(page, "Didn't catch a name", 6000);
+    await waitForFocus(page, /Try again/);
+    // Back while listening cancels the recognizer.
+    await willHear(page, {text: 'Ana', waitForStop: true});
+    await press(page, 'Enter');
+    await waitForText(page, '“Ana”', 3000);
+    await press(page, 'Escape');
+    await page.waitForURL(url => new URL(url).pathname === '/');
+    // The search screen leaves (and stops listening) at the end of the route transition.
+    for (let waited = 0; (await page.evaluate(() => window.__speechLog)).at(-1).op !== 'abort' && waited < 3000; waited += 100) {
+      await page.waitForTimeout(100);
+    }
+    assert.equal((await page.evaluate(() => window.__speechLog)).at(-1).op, 'abort', 'Back aborts the recognition');
+    assert.equal(await page.evaluate(() => window.__speechControl.active), null);
+
+    // A recognizer that cannot work here (no microphone): said once, then the entry point goes away.
+    await page.waitForTimeout(800);
+    await willHear(page, {error: 'not-allowed'});
+    await pressUntil(page, 'ArrowUp', /Voice search/);
+    await press(page, 'Enter');
+    await waitForText(page, "Voice search isn't available", 6000);
+    await waitForFocus(page, /Back/);
+    await press(page, 'Enter');
+    await page.waitForURL(url => new URL(url).pathname === '/');
+    await page.waitForTimeout(800);
+    assert.equal(await page.getByText('Voice search').count(), 0, 'entry point hidden once speech failed as unavailable');
+    assert.deepEqual(problems, []);
+  } finally {
+    await context.close();
+  }
+
+  // window.lumen.audio only (no SpeechRecognition): record, a pause ends it, transcribe.
+  {
+    const {context, page, problems} = await newPage(browser, {values: ACCOUNT, audio: true});
+    try {
+      await page.goto(`${FAKE_APP}/`);
+      await waitForText(page, 'Carla Dias');
+      await page.waitForTimeout(800);
+      await page.evaluate(() => Object.assign(window.__audioControl, {quietAfterMs: 1000, transcript: 'Joao Silva'}));
+      await openVoiceSearch(page);
+      await waitForText(page, 'Listening…');
+      await waitForText(page, 'No chat or contact matches “Joao Silva”', 8000);
+      const audioLog = await page.evaluate(() => window.__audioLog);
+      assert.equal(audioLog.records.length, 1);
+      assert.equal(audioLog.stops, 1, 'the pause stopped the recording');
+      assert.equal(audioLog.transcribes, 1);
+      assert.ok(audioLog.partials >= 1, 'partial text while transcribing');
+      await page.evaluate(() => Object.assign(window.__audioControl, {quietAfterMs: 800, transcript: 'ana souza'}));
+      await press(page, 'Enter');
+      await waitForFocus(page, /^div\|Ana Souza/, 8000);
+      await press(page, 'Enter');
+      await page.waitForURL(`**/chat/${ANA}`);
+      assert.deepEqual(problems, []);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // Both: SpeechRecognition refused (no microphone) falls back to window.lumen.audio.
+  {
+    const {context, page, problems} = await newPage(browser, {values: ACCOUNT, audio: true, speech: true, locale: 'pt-PT'});
+    try {
+      await page.goto(`${FAKE_APP}/`);
+      await waitForText(page, 'Carla Dias');
+      await page.waitForTimeout(800);
+      assert.ok(await page.getByText('Busca por voz').count() >= 1, 'pt entry point');
+      await willHear(page, {error: 'service-not-allowed'});
+      await page.evaluate(() => Object.assign(window.__audioControl, {quietAfterMs: 800, transcript: 'Carla'}));
+      await waitForFocus(page, /^div\|Ana Souza, /);
+      await press(page, 'ArrowUp');
+      await press(page, 'Enter');
+      await waitForFocus(page, /^div\|Carla Dias/, 10000);
+      const log = await page.evaluate(() => window.__speechLog);
+      assert.equal(log[0].lang, 'pt-PT', 'the page language (pt-PT on the glasses)');
+      assert.equal((await page.evaluate(() => window.__audioLog)).records.length, 1, 'fell back to window.lumen.audio');
+      await page.screenshot({path: path.join(outDir, `${label}-search-6-pt-fallback.png`)});
+      assert.deepEqual(problems, []);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function run() {
   const releaseServer = await startStaticServer(path.join(root, 'dist'), 4173);
   const fakeServer = await startStaticServer(path.join(root, 'dist-e2e'), 4174);
@@ -960,6 +1192,7 @@ async function run() {
           // The sandbox has no audio output for Firefox; it decodes but cannot play.
           await demoFlow(browser, name, APP, {audioOutput: name !== 'firefox'});
         });
+        await test(`[${name}] voice search: entry point, SpeechRecognition and window.lumen.audio, fuzzy names, contacts, no match, fallback`, () => voiceSearchFlow(browser, name));
         await test(`[${name}] long messages (first, middle, last): Down/Up scroll through each before moving on`, () => longMessagesFlow(browser, name));
         await test(`[${name}] voice notes: record, send (waveform), discard, Back, 2-minute limit, busy/no-phone, transcribe (partials, kept, engine error)`, () => voiceFlow(browser));
         await test(`[${name}] setup screen without configuration`, async () => {

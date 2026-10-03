@@ -15,7 +15,7 @@ import type {TelegramConfig} from '../config/lumenConfig';
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload, type VoiceNote} from './api';
 import {entityName, reactionsOf, toChat, toMessage, type Tl} from './convert';
 import {toTelegramError} from './errors';
-import type {AllowedReactions, Chat, ChatMessage} from './model';
+import type {AllowedReactions, Chat, ChatMessage, Contact} from './model';
 
 /** Web endpoints of the data centers; the session's own address (an IP from a desktop login) has no TLS certificate. */
 const WEB_HOSTS: Record<number, string> = {1: 'pluto', 2: 'venus', 3: 'aurora', 4: 'vesta', 5: 'flora'};
@@ -277,6 +277,28 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
 
   return {
     getChats: limit => call(() => loadChats(limit)),
+
+    getContacts: () =>
+      call(async () => {
+        const result = await client.invoke(new Api.contacts.GetContacts({hash: bigInt(0)}));
+        if (!(result instanceof Api.contacts.Contacts)) {
+          return [];
+        }
+        const contacts: Contact[] = [];
+        for (const user of result.users) {
+          if (!(user instanceof Api.User) || user.deleted || user.self) {
+            continue;
+          }
+          // Known with its access hash, so its conversation opens like a chat's.
+          remember(user);
+          const id = peerId(user);
+          const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+          if (id && name) {
+            contacts.push({id, name, phone: user.phone ? `+${user.phone}` : null});
+          }
+        }
+        return contacts;
+      }),
 
     getMessages: (chatId, limit) =>
       call(async () => {

@@ -1,3 +1,4 @@
+import microphoneFilled from '@wearables-ui-toolkit/icons/svg/microphone__filled.svg';
 import {
   ListItem,
   Page,
@@ -11,9 +12,11 @@ import {useNavigate} from 'react-router-dom';
 import {avatarFallback} from '../components/avatarFallback';
 import {chatDisplayName, chatPreview, formatListTime} from '../format';
 import {t} from '../i18n/strings';
+import {useVoiceInput} from '../search/useVoiceInput';
 import {useReturnOrder} from '../state/useReturnOrder';
 import {useChat} from '../ChatProvider';
 import {ChatListEmptyPage} from './ChatListEmptyPage';
+import {DEMO_SEARCH_PHRASE, SEARCH_PATH} from './SearchPage';
 import {StatusPage} from './StatusPage';
 
 export function chatPath(chatId: string): string {
@@ -22,7 +25,8 @@ export function chatPath(chatId: string): string {
 
 export function ChatListPage() {
   const navigate = useNavigate();
-  const {phase, chats, offline, syncing, isUnread, listOrder, avatarFor, requestAvatar} = useChat();
+  const {phase, chats, offline, syncing, isUnread, listOrder, avatarFor, requestAvatar, demo} = useChat();
+  const voice = useVoiceInput(demo ? DEMO_SEARCH_PHRASE : null);
 
   const rows = useReturnOrder(chats, listOrder);
 
@@ -47,6 +51,16 @@ export function ChatListPage() {
       headerMetadata={offline && !syncing ? t('offlineMeta') : undefined}
       enableSystemBarInset={false}>
       <VerticalList insetForHeader ariaLabel={t('chatListLabel')}>
+        {/* Above the first chat, one Up away; the first chat keeps the initial focus. */}
+        {voice.input != null ? (
+          <ListItem
+            title={t('voiceSearchRow')}
+            subtitle={t('voiceSearchHint')}
+            icon={microphoneFilled}
+            initialFocusEligible={false}
+            onClick={() => navigate(SEARCH_PATH)}
+          />
+        ) : null}
         {rows.map(chat => {
           const name = chatDisplayName(chat);
           const unread = isUnread(chat);

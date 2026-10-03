@@ -14,7 +14,7 @@ import type {TelegramConfig} from '../../src/config/lumenConfig';
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from '../../src/telegram/api';
 import {sameEmoji} from '../../src/telegram/convert';
 import {decodeWaveform} from '../../src/telegram/waveform';
-import type {AllowedReactions, Chat, ChatMessage, MessageContent, ReactionSummary} from '../../src/telegram/model';
+import type {AllowedReactions, Chat, ChatMessage, Contact, MessageContent, ReactionSummary} from '../../src/telegram/model';
 
 type Init = {connect?: 'ok' | 'auth' | 'network' | 'flood'; downForMs?: number; push?: boolean; mediaFails?: boolean};
 
@@ -120,10 +120,29 @@ function createController() {
   const log: Log = {connects: 0, sent: [], voice: [], reactions: [], reads: [], mediaRequests: [], photoRequests: []};
   const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false};
 
+  // Saved contacts: the people with a chat, and Bruno Lima, who has none yet.
+  const contacts: Contact[] = [
+    {id: '1001', name: 'Ana Souza', phone: '+5511999990001'},
+    {id: '1003', name: 'Carla Dias', phone: '+5511999990003'},
+    {id: '1005', name: 'Diego Alves', phone: null},
+    {id: '1008', name: 'Bruno Lima', phone: '+5511999990002'},
+  ];
+  // A contact's conversation before its first message; it joins the list once a message is sent.
+  const contactChats = new Map<string, FakeChat>();
   const chatFor = (chatId: string) => {
     const chat = chats.find(item => item.id === chatId);
-    if (!chat) throw new TelegramError('rejected', 'PEER_ID_INVALID', 'PEER_ID_INVALID');
-    return chat;
+    if (chat) return chat;
+    const contact = contacts.find(item => item.id === chatId);
+    if (!contact) throw new TelegramError('rejected', 'PEER_ID_INVALID', 'PEER_ID_INVALID');
+    let pending = contactChats.get(chatId);
+    if (!pending) {
+      pending = {id: contact.id, name: contact.name, isGroup: false, unreadCount: 0, hasPhoto: false, messages: [], allowed: {kind: 'some', emojis: STANDARD}};
+      contactChats.set(chatId, pending);
+    }
+    return pending;
+  };
+  const listChat = (chat: FakeChat) => {
+    if (!chats.includes(chat)) chats.push(chat);
   };
   const notify = (chatId: string) => {
     if (state.push) for (const listener of listeners) listener({chatId});
@@ -182,6 +201,10 @@ function createController() {
             .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
             .slice(0, limit);
         },
+        async getContacts() {
+          await guard();
+          return contacts.map(contact => ({...contact}));
+        },
         async getMessages(chatId, limit) {
           await guard();
           return chatFor(chatId).messages.slice(-limit).map(copy);
@@ -198,6 +221,7 @@ function createController() {
           });
           const sent = msg(chatId, true, 0, {kind: 'audio', text: '', seconds}, null);
           chatFor(chatId).messages.push(sent);
+          listChat(chatFor(chatId));
           return copy(sent);
         },
         async sendText(chatId, text, replyToId) {
@@ -205,6 +229,7 @@ function createController() {
           log.sent.push({chatId, text, replyToId: replyToId ?? null});
           const sent = msg(chatId, true, 0, {kind: 'text', text}, null);
           chatFor(chatId).messages.push(sent);
+          listChat(chatFor(chatId));
           return copy(sent);
         },
         async sendReaction(chatId, messageId, emoji) {

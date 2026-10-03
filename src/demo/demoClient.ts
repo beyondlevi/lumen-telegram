@@ -7,7 +7,7 @@
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from '../telegram/api';
 import {sameEmoji} from '../telegram/convert';
 import {withMyReaction} from '../telegram/reactions';
-import type {AllowedReactions, Chat, ChatMessage} from '../telegram/model';
+import type {AllowedReactions, Chat, ChatMessage, Contact} from '../telegram/model';
 import voiceNote from './assets/voice-note.ogg';
 import {DEMO_DAY_END, DEMO_STANDARD_REACTIONS, demoChats, type DemoChat, type DemoMessage} from './demoData';
 
@@ -103,6 +103,13 @@ export function createDemoClient(): ChatApi {
         })
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
         .slice(0, limit);
+    },
+
+    async getContacts() {
+      // The demo's people with a name (not the groups, channels or the unknown number).
+      return chats
+        .filter(chat => !chat.isGroup && chat.name)
+        .map((chat): Contact => ({id: chat.id, name: chat.name ?? '', phone: chat.phone ?? null}));
     },
 
     async getMessages(chatId, limit) {

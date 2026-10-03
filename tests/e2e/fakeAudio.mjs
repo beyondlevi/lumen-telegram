@@ -8,6 +8,7 @@
 //   startDelayMs  number: record() resolves after that time (the phone confirming the microphone)
 //   stopDelayMs   number: stop() resolves after that time (encoding and transfer of the file)
 //   endAfterMs    number: the recording ends by itself ('max') after that time
+//   quietAfterMs  number: from that time the input level drops to silence (the wearer paused)
 //   transcribeError 'engine' | 'no-speech' | … : the next transcribe() rejects
 //   transcript    text returned by transcribe(), delivered word by word as partials
 // __audioLog: {records: [options], stops, cancels, transcribes, partials}
@@ -17,7 +18,7 @@ export function fakeAudioScript(voiceUrl) {
   return `
     (() => {
       const voiceUrl = ${JSON.stringify(voiceUrl)};
-      const control = (window.__audioControl = {recordError: null, startDelayMs: 0, stopDelayMs: 0, endAfterMs: null, transcribeError: null,
+      const control = (window.__audioControl = {recordError: null, startDelayMs: 0, stopDelayMs: 0, endAfterMs: null, quietAfterMs: null, transcribeError: null,
         transcript: 'This is a fake transcript of the voice message.'});
       const log = (window.__audioLog = {records: [], stops: 0, cancels: 0, transcribes: 0, partials: 0});
       const failure = (code, message) => Object.assign(new Error(message || code), {code});
@@ -62,7 +63,8 @@ export function fakeAudioScript(voiceUrl) {
               result().then(audio => recording.onEnd && recording.onEnd('max', audio));
               return;
             }
-            recording.onLevel && recording.onLevel(0.15 + 0.15 * Math.abs(Math.sin(elapsed / 300)), elapsed);
+            const quiet = control.quietAfterMs != null && elapsed >= control.quietAfterMs;
+            recording.onLevel && recording.onLevel(quiet ? 0.01 : 0.15 + 0.15 * Math.abs(Math.sin(elapsed / 300)), elapsed);
           }, 200);
           return recording;
         },

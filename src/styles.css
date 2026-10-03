@@ -195,3 +195,7 @@ body {
   align-items: center;
   gap: var(--uit-spacing-small);
 }
+
+.search-heard {
+  overflow-wrap: anywhere;
+}

@@ -7,7 +7,9 @@ import {isAbortError, TelegramError, type ChatApi} from '../telegram/api';
 import {connectClient} from '../telegram/connect';
 import {sameEmoji} from '../telegram/convert';
 import {withMyReaction} from '../telegram/reactions';
-import type {AllowedReactions, Chat, ChatMessage, ReactionSummary} from '../telegram/model';
+import type {AllowedReactions, Chat, ChatMessage, Contact, ReactionSummary} from '../telegram/model';
+import {chatDisplayName, chatPreview} from '../format';
+import type {SearchTarget} from '../search/searchTargets';
 import {createDemoAudio} from '../audio/demoAudio';
 import {hostAudio, type LumenAudio, type LumenAudioResult} from '../audio/lumenAudio';
 import {encodeWaveform} from '../telegram/waveform';
@@ -75,6 +77,12 @@ export type ChatState = {
   saveTranscript(messageId: string, text: string): void;
   /** Chat order last shown by the list; kept across the list route's unmounts. */
   listOrder: {current: string[] | null};
+  /** Demo mode: fictional chats, no connection. */
+  demo: boolean;
+  /** The list's chats (recent first) and the saved contacts, for voice search; contacts load once. */
+  searchTargets(): Promise<SearchTarget[]>;
+  /** Saved name of a contact, for a conversation that is not in the list yet. */
+  contactName(chatId: string): string | null;
 };
 
 const EMPTY_THREAD: Thread = {loaded: false, synced: false, messages: []};
@@ -126,6 +134,9 @@ export function useChatState(): ChatState {
   const offlineRef = useRef(false);
   const chatsRef = useRef<Chat[]>([]);
   chatsRef.current = chats;
+  // Saved contacts for voice search, fetched on the first search of a connection.
+  const contactListRef = useRef<{api: ChatApi; list: Promise<Contact[]>} | null>(null);
+  const [contactNames, setContactNames] = useState<ReadonlyMap<string, string>>(new Map());
   const threadsRef = useRef<Record<string, Thread>>({});
   threadsRef.current = threads;
   const listOrderRef = useRef<string[] | null>(null);
@@ -567,6 +578,46 @@ export function useChatState(): ChatState {
     return () => clearTimeout(timer);
   }, [account, chats, phase.kind, syncing, threads]);
 
+  const searchTargets = useCallback(async (): Promise<SearchTarget[]> => {
+    if (api == null) {
+      return [];
+    }
+    if (contactListRef.current?.api !== api) {
+      const list = api.getContacts();
+      contactListRef.current = {api, list};
+      list.then(
+        contacts => setContactNames(new Map(contacts.map(contact => [contact.id, contact.name]))),
+        () => {
+          // Try again on the next search.
+          if (contactListRef.current?.list === list) {
+            contactListRef.current = null;
+          }
+        },
+      );
+    }
+    const chatTargets: SearchTarget[] = chatsRef.current.map(chat => ({
+      id: chat.id,
+      name: chatDisplayName(chat),
+      phone: chat.phone ?? null,
+      isGroup: chat.isGroup,
+      detail: chatPreview(chat),
+      inChats: true,
+    }));
+    let contacts: Contact[] = [];
+    try {
+      contacts = await contactListRef.current.list;
+    } catch {
+      // Without contacts, the chats alone are searched.
+    }
+    const inChats = new Set(chatTargets.map(target => target.id));
+    return [
+      ...chatTargets,
+      ...contacts
+        .filter(contact => !inChats.has(contact.id))
+        .map(contact => ({id: contact.id, name: contact.name, phone: contact.phone, isGroup: false, detail: null, inChats: false})),
+    ];
+  }, [api]);
+
   const isUnread = useCallback(
     (chat: Chat) => chat.unreadCount > 0 && chat.id !== activeChat && (chat.timestamp ?? 0) > (readMarks[chat.id] ?? 0),
     [activeChat, readMarks],
@@ -605,8 +656,11 @@ export function useChatState(): ChatState {
       transcriptFor: messageId => transcripts[messageId] ?? null,
       saveTranscript,
       listOrder: listOrderRef,
+      demo,
+      searchTargets,
+      contactName: chatId => contactNames.get(chatId) ?? null,
     }),
     // avatarVersion: a photo finished loading.
-    [allowed, audio, avatarVersion, avatars, chats, isUnread, loadMedia, offline, openThread, phase, reloadConfig, saveTranscript, sendReaction, sendText, sendVoice, syncing, threads, transcripts],
+    [allowed, audio, avatarVersion, avatars, chats, contactNames, demo, isUnread, loadMedia, offline, openThread, phase, reloadConfig, saveTranscript, searchTargets, sendReaction, sendText, sendVoice, syncing, threads, transcripts],
   );
 }

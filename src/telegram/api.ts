@@ -1,4 +1,4 @@
-import type {AllowedReactions, Chat, ChatMessage} from './model';
+import type {AllowedReactions, Chat, ChatMessage, Contact} from './model';
 
 export type TelegramErrorKind =
   /** No connection to Telegram (offline, DNS, TLS, proxy, timeout). */
@@ -41,6 +41,8 @@ export type ChatUpdate = {
 export type ChatApi = {
   /** Most recent chats first. */
   getChats(limit: number): Promise<Chat[]>;
+  /** Saved contacts (users), with or without a chat. */
+  getContacts(): Promise<Contact[]>;
   /** Oldest first. */
   getMessages(chatId: string, limit: number): Promise<ChatMessage[]>;
   sendText(chatId: string, text: string, replyToId?: string): Promise<ChatMessage>;

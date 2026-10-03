@@ -83,12 +83,14 @@ function focusNewestBubble(list: HTMLElement | null | undefined) {
 }
 
 function Thread({chatId}: {chatId: string}) {
-  const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor} =
+  const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor, contactName} =
     useChat();
   const location = useLocation();
   const navigate = useNavigate();
   const chat = chatFor(chatId);
-  const name = chatDisplayName(chat);
+  // A contact found by voice search may have no conversation in the list yet.
+  const savedName = chat?.name ?? contactName(chatId);
+  const name = chat?.name ? chatDisplayName(chat) : savedName ?? chatDisplayName(chat);
   const {loaded, synced, messages: records} = thread(chatId);
   const isGroup = chat?.isGroup ?? false;
   const messages = records;
@@ -278,7 +280,7 @@ function Thread({chatId}: {chatId: string}) {
       headerText={name}
       headerShowAvatar
       headerAvatarSrc={avatar ?? undefined}
-      headerAvatarPrimaryContent={avatar ? undefined : avatarFallback(chat?.name, isGroup)}
+      headerAvatarPrimaryContent={avatar ? undefined : avatarFallback(savedName, isGroup)}
       headerAvatarAlt={name}
       headerIsLoading={!synced}
       headerMetadata={offline && synced ? t('offlineMeta') : undefined}

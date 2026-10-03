@@ -71,3 +71,12 @@ export type Chat = {
 
 /** Reactions the chat accepts. `all`: any standard emoji reaction. */
 export type AllowedReactions = {kind: 'all'} | {kind: 'some'; emojis: string[]} | {kind: 'none'};
+
+/** A saved contact (a user), who may have no chat yet. */
+export type Contact = {
+  /** Marked peer id, as for a chat. */
+  id: string;
+  name: string;
+  /** International form, when shared. */
+  phone: string | null;
+};
