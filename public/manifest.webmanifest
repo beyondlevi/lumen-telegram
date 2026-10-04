@@ -1,7 +1,7 @@
 {
   "id": "cloud.bynd.lumen.telegram",
-  "name": "Telegram for Lumen",
-  "short_name": "Telegram",
+  "name": "Unofficial Telegram for Lumen",
+  "short_name": "Unofficial Telegram",
   "version": "0.3.0",
   "description": "Read and answer Telegram chats with your own account (MTProto).",
   "lang": "en",

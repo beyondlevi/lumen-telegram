@@ -1,10 +1,24 @@
 # lumen-telegram
 
-Telegram client for **Rokid Lumen** glasses, built as a Meta Ray-Ban Display (MRBD) web app with the official
+Unofficial Telegram client for [Rokid Lumen](https://github.com/beyondlevi/rokid-lumen) glasses, built as a Meta Ray-Ban Display (MRBD) web app with the official
 [UI Toolkit for Meta Ray-Ban Display](https://github.com/facebook/meta-ray-ban-display-ui-toolkit-web). It is
 the sibling of `lumen-whatsapp` and has the same screens and controls. It signs in as **your Telegram user
 account** over MTProto with [GramJS](https://gram.js.org) (`telegram` on npm), straight from the browser
 through WebSocket, with no server in between.
+
+> **Unofficial.** lumen-telegram ("Unofficial Telegram for Lumen") is an independent project built on
+> the [Telegram API](https://core.telegram.org/api). It is not affiliated with, endorsed or sponsored
+> by Telegram, Meta Platforms, Inc., or Rokid. Telegram is a trademark of Telegram, used here only to
+> say what the app works with.
+>
+> **Your own API credentials.** Each user signs in with their own `api_id` and `api_hash` from
+> [my.telegram.org](https://my.telegram.org) and must follow the
+> [Telegram API Terms of Service](https://core.telegram.org/api/terms). The software is provided
+> "as is", without warranty (see [LICENSE](LICENSE)).
+>
+> **Not yet supported: sponsored messages.** The API terms ask clients that show channels to show
+> Telegram's sponsored messages in them. This app opens channels but doesn't fetch or show sponsored
+> messages yet (`messages.getSponsoredMessages`).
 
 - **Chats**: profile photo, name, preview, and time for the 40 most recent chats (archived chats excluded).
   Unread chats have an unread dot on the avatar and an accent-colored time. A chat without a name shows the
@@ -169,7 +183,7 @@ memory for that page load only and removes them from the address bar.
 
 ## Telegram over MTProto (GramJS)
 
-Checked against the Telegram documentation and measured from this sandbox in headless Chromium and Firefox
+Checked against the Telegram documentation and measured in headless Chromium and Firefox
 (see `tests/live/transport.mjs`):
 
 - **Transport.** WebSocket: `wss://<dc>.web.telegram.org/apiws` on port 443, subprotocol `binary`
@@ -234,7 +248,7 @@ marks the header **Offline** until a refresh succeeds.
   server (TDLib or GramJS on a server) that the app reaches over HTTPS, the way lumen-whatsapp reaches
   Evolution. The session would then live on that server.
 
-- **WebSocket through the phone's proxy (to measure on the glasses).** In this sandbox, through a local
+- **WebSocket through the phone's proxy (to measure on the glasses).** In a local test, through a local
   HTTP CONNECT proxy:
   - Chromium completed the MTProto handshake and a call;
   - Firefox's first WebSocket through the proxy failed in every run, and the GramJS retry succeeded.
@@ -435,3 +449,19 @@ Chromium and Firefox):
 
 Headless browsers do not replace a test on the glasses (GeckoView, the proxy, the dictation composer, the
 Back gesture).
+
+## License
+
+GPL-3.0-or-later, see [LICENSE](LICENSE). Copyright (c) 2026 Levi Nóbrega.
+
+The built package (`.mrbd.zip`) includes [GramJS](https://github.com/gram-js/gramjs) (MIT) and, through
+it, `@cryptography/aes` (GPL-3.0-or-later), so the app as a whole is distributed under the GPL.
+
+Third-party:
+
+- The screens follow the [UI Toolkit for Meta Ray-Ban Display](https://github.com/facebook/meta-ray-ban-display-ui-toolkit-web)'s
+  messaging example, Copyright Meta Platforms, Inc., Apache License 2.0; `src/components/MessageBubble.tsx`
+  is adapted from it. The toolkit packages (`@wearables-ui-toolkit/mrbd`, `foundation`) are Apache-2.0;
+  `@wearables-ui-toolkit/icons`, bundled into the built `.mrbd.zip`, is under the Meta Wearables
+  Developer Terms.
+- Other runtime dependencies are MIT, ISC, BSD, Apache-2.0, 0BSD or Unlicense (see `package-lock.json`).

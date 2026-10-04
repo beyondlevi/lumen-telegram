@@ -2,7 +2,7 @@
 // Portuguese (pt-BR copy) is chosen for any `pt-*` browser language.
 
 const en = {
-  appName: 'Telegram',
+  appName: 'Unofficial Telegram',
   chatsHeader: 'Chats',
   offlineMeta: 'Offline',
   chatListLabel: 'Telegram chats',
@@ -170,7 +170,7 @@ export type StringKey = keyof typeof en;
 type Strings = Record<StringKey, string>;
 
 const pt: Strings = {
-  appName: 'Telegram',
+  appName: 'Unofficial Telegram',
   chatsHeader: 'Conversas',
   offlineMeta: 'Sem conexão',
   chatListLabel: 'Conversas do Telegram',
