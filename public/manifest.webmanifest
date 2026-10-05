@@ -2,7 +2,7 @@
   "id": "cloud.bynd.lumen.telegram",
   "name": "Unofficial Telegram for Lumen",
   "short_name": "Unofficial Telegram",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Read and answer Telegram chats with your own account (MTProto).",
   "lang": "en",
   "start_url": "./",
@@ -20,5 +20,8 @@
     {"key": "telegram.session", "label": "Session (npm run login)", "type": "secret"},
     {"key": "demo", "label": "Demo mode (screenshots)", "type": "text", "optional": true}
   ],
-  "lumen_internet": true
+  "lumen_internet": true,
+  "lumen_notifications": [
+    {"packages": ["org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.messenger.beta"], "open": "/notification/{shortcut}"}
+  ]
 }

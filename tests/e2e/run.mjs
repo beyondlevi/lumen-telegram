@@ -1171,6 +1171,116 @@ async function voiceSearchFlow(browser, label) {
   }
 }
 
+// ------------------------------------------------ opening from a notification
+
+/** Lumen opens /notification/{shortcut}; Telegram for Android's shortcut is ndid_<dialogId>. */
+async function openNotification(page, base, shortcut) {
+  await page.goto(`${base}/notification/${encodeURIComponent(shortcut)}`);
+}
+
+/** Waits until the screen's only page header reads `expected` (the page transition has ended). */
+async function waitForHeader(page, expected, timeout = 5000) {
+  const headers = () => page.evaluate(() => [...document.querySelectorAll('h1, [role="heading"]')].map(element => element.textContent?.trim() ?? ''));
+  const started = Date.now();
+  let last = [];
+  while (Date.now() - started < timeout) {
+    last = await headers();
+    // The header may start with the avatar initials.
+    if (last.length === 1 && last[0].endsWith(expected)) return;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`header never read ${expected}; last: ${JSON.stringify(last)}`);
+}
+
+/** Back from the conversation reaches the list, and the list has no history left (Back then closes the app). */
+async function backToList(page, base) {
+  await press(page, 'Escape');
+  await page.waitForURL(`${base}/`);
+  await waitForText(page, 'Chats');
+  assert.ok(!(await page.evaluate(() => location.pathname)).startsWith('/notification'));
+  assert.equal(await escapeReachesHost(page), true, 'nothing left behind the list');
+}
+
+async function notificationFlow(browser, label) {
+  // No cached chats and Telegram late: the loading screen shows while the chat is looked up.
+  {
+    const {context, page, problems} = await newPage(browser, {values: ACCOUNT, fakeInit: {downForMs: 2500}});
+    try {
+      await openNotification(page, FAKE_APP, 'ndid_1001');
+      await waitForText(page, 'Loading…');
+      assert.match(page.url(), /\/notification\/ndid_1001$/);
+      await page.screenshot({path: path.join(outDir, `${label}-notification-loading.png`)});
+      await page.waitForURL(`${FAKE_APP}/chat/${ANA}`, {timeout: 10000});
+      await waitForText(page, 'Levo o projetor');
+      await waitForHeader(page, 'Ana Souza');
+      assert.deepEqual(await fake(page, () => window.__fakeTelegram.log.resolves), [], 'found in the list');
+      await page.screenshot({path: path.join(outDir, `${label}-notification-user.png`)});
+      await backToList(page, FAKE_APP);
+      assert.match(await activeLabel(page), /^div\|Ana Souza, /);
+      assert.deepEqual(problems, []);
+    } finally {
+      await context.close();
+    }
+  }
+
+  const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
+  try {
+    // A basic group in the list (dialog -2002 is chat -2002).
+    await openNotification(page, FAKE_APP, `ndid_${FAMILY}`);
+    await page.waitForURL(`${FAKE_APP}/chat/${FAMILY}`);
+    await waitForText(page, 'Photo: Olha isso');
+    await waitForHeader(page, 'Família');
+    await backToList(page, FAKE_APP);
+
+    // From the cached list (this context ran the app): opens at once, before Telegram answers.
+    await openNotification(page, FAKE_APP, `ndid_${CARLA}`);
+    await page.waitForURL(`${FAKE_APP}/chat/${CARLA}`);
+    await waitForText(page, 'Me manda o endereço?');
+    await waitForHeader(page, 'Carla Dias');
+    assert.deepEqual(await fake(page, () => window.__fakeTelegram.log.resolves), [], 'found in the list');
+    await backToList(page, FAKE_APP);
+
+    // A supergroup outside the loaded list: dialog -1500000077 is channel -1001500000077, looked up on Telegram.
+    await openNotification(page, FAKE_APP, 'ndid_-1500000077');
+    await page.waitForURL(`${FAKE_APP}/chat/-1001500000077`, {timeout: 10000});
+    await waitForText(page, 'Saída às 7h do portão norte');
+    await waitForHeader(page, 'Trilhas BR');
+    assert.ok(await page.getByText('Rui', {exact: false}).count() >= 1, 'group sender names are shown');
+    assert.deepEqual(await fake(page, () => window.__fakeTelegram.log.resolves), ['-1500000077']);
+    await page.screenshot({path: path.join(outDir, `${label}-notification-supergroup.png`)});
+    await backToList(page, FAKE_APP);
+
+    // Unknown ids and anything that is not ndid_<number> open the list, with no error screen.
+    for (const shortcut of ['ndid_-1500000099', 'ndid_424242', 'garbage', 'ndid_', 'ndid_12x', '{shortcut}']) {
+      await openNotification(page, FAKE_APP, shortcut);
+      await page.waitForURL(`${FAKE_APP}/`, {timeout: 10000});
+      await waitForText(page, 'Ana Souza');
+      assert.equal(await page.locator('[role="alert"]').count(), 0, `${shortcut}: no error screen`);
+      assert.equal(await escapeReachesHost(page), true, `${shortcut}: the list is the only entry`);
+    }
+    assert.deepEqual(problems, []);
+  } finally {
+    await context.close();
+  }
+
+  // Demo mode: the fictional channel by its dialog id.
+  {
+    const {context, page, problems} = await newPage(browser, {values: DEMO});
+    try {
+      await openNotification(page, APP, 'ndid_-1000000042');
+      await page.waitForURL(`${APP}/chat/${LIBRARY}`);
+      await waitForHeader(page, 'Library News');
+      await openNotification(page, APP, `ndid_${MAYA}`);
+      await page.waitForURL(`${APP}/chat/${MAYA}`);
+      await waitForHeader(page, 'Maya Chen');
+      await backToList(page, APP);
+      assert.deepEqual(problems, []);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function run() {
   const releaseServer = await startStaticServer(path.join(root, 'dist'), 4173);
   const fakeServer = await startStaticServer(path.join(root, 'dist-e2e'), 4174);
@@ -1194,6 +1304,7 @@ async function run() {
         });
         await test(`[${name}] voice search: entry point, SpeechRecognition and window.lumen.audio, fuzzy names, contacts, no match, fallback`, () => voiceSearchFlow(browser, name));
         await test(`[${name}] long messages (first, middle, last): Down/Up scroll through each before moving on`, () => longMessagesFlow(browser, name));
+        await test(`[${name}] opening from a notification: user, basic group, cached, supergroup outside the list, unknown and garbage ids, demo, Back to the list`, () => notificationFlow(browser, name));
         await test(`[${name}] voice notes: record, send (waveform), discard, Back, 2-minute limit, busy/no-phone, transcribe (partials, kept, engine error)`, () => voiceFlow(browser));
         await test(`[${name}] setup screen without configuration`, async () => {
           const {context, page, problems} = await newPage(browser);

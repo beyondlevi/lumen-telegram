@@ -6,6 +6,7 @@
 
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from '../telegram/api';
 import {sameEmoji} from '../telegram/convert';
+import {candidateChatIds} from '../telegram/dialogId';
 import {withMyReaction} from '../telegram/reactions';
 import type {AllowedReactions, Chat, ChatMessage, Contact} from '../telegram/model';
 import voiceNote from './assets/voice-note.ogg';
@@ -70,6 +71,20 @@ export function createDemoClient(): ChatApi {
     ...(message.reactions ? {reactions: message.reactions.map(item => ({...item}))} : {}),
     ...(message.recentReaction ? {recentReaction: {...message.recentReaction}} : {}),
   });
+  const summary = (chat: StoredChat): Chat => {
+    const last = chat.messages[chat.messages.length - 1];
+    return {
+      id: chat.id,
+      name: chat.name ?? null,
+      ...(chat.phone ? {phone: chat.phone} : {}),
+      isGroup: chat.isGroup,
+      unreadCount: chat.unreadCount,
+      lastMessage: last ? toModel(chat, last) : null,
+      timestamp: last?.timestamp ?? null,
+      hasPhoto: chat.avatar != null,
+      ...(chat.avatar ? {photoKey: `demo-${chat.id}`} : {}),
+    };
+  };
   const add = (chat: StoredChat, message: Omit<StoredMessage, 'id' | 'timestamp'>) => {
     nextId += 1;
     const stored: StoredMessage = {...message, id: String(nextId), timestamp: now()};
@@ -87,22 +102,16 @@ export function createDemoClient(): ChatApi {
   return {
     async getChats(limit) {
       return chats
-        .map((chat): Chat => {
-          const last = chat.messages[chat.messages.length - 1];
-          return {
-            id: chat.id,
-            name: chat.name ?? null,
-            ...(chat.phone ? {phone: chat.phone} : {}),
-            isGroup: chat.isGroup,
-            unreadCount: chat.unreadCount,
-            lastMessage: last ? toModel(chat, last) : null,
-            timestamp: last?.timestamp ?? null,
-            hasPhoto: chat.avatar != null,
-            ...(chat.avatar ? {photoKey: `demo-${chat.id}`} : {}),
-          };
-        })
+        .map(summary)
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
         .slice(0, limit);
+    },
+
+    async resolveDialog(dialog) {
+      // Demo chat ids are marked ids, so each one has a dialog id as Telegram for Android counts it.
+      const candidates = new Set(candidateChatIds(dialog));
+      const chat = chats.find(item => candidates.has(item.id));
+      return chat ? summary(chat) : null;
     },
 
     async getContacts() {

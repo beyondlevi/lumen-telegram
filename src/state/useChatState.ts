@@ -6,6 +6,7 @@ import {setLocaleOverride, t} from '../i18n/strings';
 import {isAbortError, TelegramError, type ChatApi} from '../telegram/api';
 import {connectClient} from '../telegram/connect';
 import {sameEmoji} from '../telegram/convert';
+import {findListedChat, type NotificationDialog} from '../telegram/dialogId';
 import {withMyReaction} from '../telegram/reactions';
 import type {AllowedReactions, Chat, ChatMessage, Contact, ReactionSummary} from '../telegram/model';
 import {chatDisplayName, chatPreview} from '../format';
@@ -83,6 +84,11 @@ export type ChatState = {
   searchTargets(): Promise<SearchTarget[]>;
   /** Saved name of a contact, for a conversation that is not in the list yet. */
   contactName(chatId: string): string | null;
+  /**
+   * Chat id of a notification's dialog: from the loaded (or cached) list, else
+   * looked up on Telegram; null when it cannot be found.
+   */
+  resolveDialog(dialog: NotificationDialog): Promise<string | null>;
 };
 
 const EMPTY_THREAD: Thread = {loaded: false, synced: false, messages: []};
@@ -123,6 +129,8 @@ export function useChatState(): ChatState {
   const [allowed, setAllowed] = useState<Record<string, AllowedReactions>>({});
   const [avatarVersion, setAvatarVersion] = useState(0);
   const [transcripts, setTranscripts] = useState<Record<string, string>>({});
+  // Chats opened from a notification that are not in the loaded list.
+  const [resolvedChats, setResolvedChats] = useState<Record<string, Chat>>({});
   const audio = useMemo(() => (config.status === 'demo' ? createDemoAudio() : hostAudio()), [config.status]);
   const allowedRef = useRef(allowed);
   allowedRef.current = allowed;
@@ -244,6 +252,7 @@ export function useChatState(): ChatState {
     }
     setApi(null);
     setAllowed({});
+    setResolvedChats({});
     markedReadRef.current = new Map();
     offlineRef.current = false;
     setOffline(false);
@@ -618,6 +627,29 @@ export function useChatState(): ChatState {
     ];
   }, [api]);
 
+  const resolveDialog = useCallback(
+    async (dialog: NotificationDialog): Promise<string | null> => {
+      const listed = findListedChat(dialog, chatsRef.current);
+      if (listed) {
+        return listed.id;
+      }
+      if (api == null) {
+        return null;
+      }
+      try {
+        const chat = await api.resolveDialog(dialog);
+        if (chat == null) {
+          return null;
+        }
+        setResolvedChats(previous => ({...previous, [chat.id]: chat}));
+        return chat.id;
+      } catch {
+        return null;
+      }
+    },
+    [api],
+  );
+
   const isUnread = useCallback(
     (chat: Chat) => chat.unreadCount > 0 && chat.id !== activeChat && (chat.timestamp ?? 0) > (readMarks[chat.id] ?? 0),
     [activeChat, readMarks],
@@ -631,7 +663,7 @@ export function useChatState(): ChatState {
       syncing,
       isUnread,
       thread: chatId => threads[chatId] ?? EMPTY_THREAD,
-      chatFor: chatId => chats.find(chat => chat.id === chatId),
+      chatFor: chatId => chats.find(chat => chat.id === chatId) ?? resolvedChats[chatId],
       retry: () => setConnectAttempt(count => count + 1),
       reloadConfig: () => {
         void reloadConfig().then(next => {
@@ -659,8 +691,9 @@ export function useChatState(): ChatState {
       demo,
       searchTargets,
       contactName: chatId => contactNames.get(chatId) ?? null,
+      resolveDialog,
     }),
     // avatarVersion: a photo finished loading.
-    [allowed, audio, avatarVersion, avatars, chats, contactNames, demo, isUnread, loadMedia, offline, openThread, phase, reloadConfig, saveTranscript, searchTargets, sendReaction, sendText, sendVoice, syncing, threads, transcripts],
+    [allowed, audio, avatarVersion, avatars, chats, contactNames, demo, isUnread, loadMedia, offline, openThread, phase, reloadConfig, resolveDialog, resolvedChats, saveTranscript, searchTargets, sendReaction, sendText, sendVoice, syncing, threads, transcripts],
   );
 }

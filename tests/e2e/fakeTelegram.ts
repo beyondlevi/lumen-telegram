@@ -13,6 +13,7 @@ import voiceNote from '../../src/demo/assets/voice-note.ogg';
 import type {TelegramConfig} from '../../src/config/lumenConfig';
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload} from '../../src/telegram/api';
 import {sameEmoji} from '../../src/telegram/convert';
+import {candidateChatIds} from '../../src/telegram/dialogId';
 import {decodeWaveform} from '../../src/telegram/waveform';
 import type {AllowedReactions, Chat, ChatMessage, Contact, MessageContent, ReactionSummary} from '../../src/telegram/model';
 
@@ -28,6 +29,8 @@ type Log = {
   voice: {chatId: string; bytes: number; head: string; seconds: number; waveform: number[]}[];
   reactions: {chatId: string; messageId: string; emoji: string | null}[];
   reads: {chatId: string; maxId: string}[];
+  /** Notification dialogs looked up on Telegram (not found in the loaded list). */
+  resolves: string[];
   mediaRequests: {chatId: string; messageId: string}[];
   photoRequests: string[];
 };
@@ -117,7 +120,7 @@ function createController() {
   const init = readInit();
   const chats = seed();
   const listeners = new Set<(update: ChatUpdate) => void>();
-  const log: Log = {connects: 0, sent: [], voice: [], reactions: [], reads: [], mediaRequests: [], photoRequests: []};
+  const log: Log = {connects: 0, sent: [], voice: [], reactions: [], reads: [], resolves: [], mediaRequests: [], photoRequests: []};
   const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false};
 
   // Saved contacts: the people with a chat, and Bruno Lima, who has none yet.
@@ -127,10 +130,18 @@ function createController() {
     {id: '1005', name: 'Diego Alves', phone: null},
     {id: '1008', name: 'Bruno Lima', phone: '+5511999990002'},
   ];
+  // A supergroup you are in whose chat is older than the loaded list: Telegram finds it by id.
+  const unlisted: FakeChat[] = [
+    {
+      id: '-1001500000077', name: 'Trilhas BR', isGroup: true, unreadCount: 0, hasPhoto: false,
+      allowed: {kind: 'some', emojis: STANDARD},
+      messages: [msg('-1001500000077', false, 6, {kind: 'text', text: 'Saída às 7h do portão norte'}, 'Rui Prado')],
+    },
+  ];
   // A contact's conversation before its first message; it joins the list once a message is sent.
   const contactChats = new Map<string, FakeChat>();
   const chatFor = (chatId: string) => {
-    const chat = chats.find(item => item.id === chatId);
+    const chat = chats.find(item => item.id === chatId) ?? unlisted.find(item => item.id === chatId);
     if (chat) return chat;
     const contact = contacts.find(item => item.id === chatId);
     if (!contact) throw new TelegramError('rejected', 'PEER_ID_INVALID', 'PEER_ID_INVALID');
@@ -279,6 +290,15 @@ function createController() {
           const media = chatFor(chatId).messages.find(item => item.id === messageId)?.media;
           if (state.mediaFails || !media) throw new TelegramError('rejected', 'MEDIA_EMPTY', 'MEDIA_EMPTY');
           return {mimetype: media.mimetype, url: new URL(media.url, location.href).href};
+        },
+        async resolveDialog(dialog) {
+          await guard();
+          log.resolves.push(dialog.kind === 'user' ? dialog.userId : `-${dialog.id}`);
+          const candidates = new Set(candidateChatIds(dialog));
+          const chat = [...chats, ...unlisted].find(item => candidates.has(item.id));
+          if (!chat) return null;
+          const {messages: _messages, allowed: _allowed, avatar: _avatar, ...rest} = chat;
+          return {...rest, unreadCount: 0, lastMessage: null, timestamp: null};
         },
         onUpdate(listener) {
           listeners.add(listener);

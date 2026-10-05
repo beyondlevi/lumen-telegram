@@ -1,3 +1,4 @@
+import type {NotificationDialog} from './dialogId';
 import type {AllowedReactions, Chat, ChatMessage, Contact} from './model';
 
 export type TelegramErrorKind =
@@ -57,6 +58,8 @@ export type ChatApi = {
   getProfilePhoto(chatId: string): Promise<MediaPayload | null>;
   /** Photo or voice message media. */
   getMedia(chatId: string, messageId: string): Promise<MediaPayload>;
+  /** The chat a notification points to, looked up on Telegram; null when it cannot be opened. */
+  resolveDialog(dialog: NotificationDialog): Promise<Chat | null>;
   /** Push updates; returns the unsubscribe function. */
   onUpdate(callback: (update: ChatUpdate) => void): () => void;
   disconnect(): Promise<void>;

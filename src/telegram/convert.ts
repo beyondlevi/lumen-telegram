@@ -172,6 +172,32 @@ function hasPhoto(entity: Tl | undefined): {hasPhoto: boolean; photoKey?: string
   return {hasPhoto: true, photoKey: idString(photo.photoId)};
 }
 
+/**
+ * A user, basic group or channel entity as a chat with no messages yet (a
+ * conversation opened from a notification that is not in the loaded list);
+ * null for entities that cannot be opened (empty, forbidden, deactivated).
+ */
+export function entityChat(value: object | null | undefined, id: string): Chat | null {
+  const entity = value as Tl | null | undefined;
+  const openable =
+    entity?.className === 'User' || entity?.className === 'Channel' || (entity?.className === 'Chat' && !entity.deactivated);
+  if (!entity || !openable || !id) {
+    return null;
+  }
+  const name = entityName(entity);
+  const phone = entity.className === 'User' && typeof entity.phone === 'string' && entity.phone ? `+${entity.phone}` : undefined;
+  return {
+    id,
+    name,
+    isGroup: entity.className === 'Chat' || (entity.className === 'Channel' && entity.megagroup === true),
+    ...(phone && !name ? {phone} : {}),
+    unreadCount: 0,
+    lastMessage: null,
+    timestamp: null,
+    ...hasPhoto(entity),
+  };
+}
+
 /** A GramJS `Dialog` (from client.getDialogs) as a chat row. */
 export function toChat(value: object, peerName?: (peer: Tl) => string | null): Chat | null {
   const dialog = value as Tl;

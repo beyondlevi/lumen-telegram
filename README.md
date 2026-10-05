@@ -360,6 +360,20 @@ opens like a chat's). A contact without a chat opens an empty conversation under
 first reply starts the chat. Opening a result replaces the search in the history, so Back from the chat
 returns to the list.
 
+## Opening from notifications
+
+The manifest's `lumen_notifications` offers this app for notifications from Telegram for Android
+(`org.telegram.messenger`, `org.telegram.messenger.web`, `org.telegram.messenger.beta`). Lumen opens
+`/notification/{shortcut}`; a chat notification's shortcut is `ndid_<dialogId>`, Telegram for Android's
+dialog id: a user's id (positive), `-chatId` for a basic group, `-channelId` for a channel or supergroup
+(without the `-100` of the marked ids that GramJS and this app use, so `ndid_-1194773306` is chat
+`-1001194773306` or basic group `-1194773306`). The app looks for the chat in the loaded (or cached) list,
+then asks Telegram (PeerUser, PeerChannel, PeerChat), and replaces `/notification/…` with the conversation,
+so Back from it goes to the chat list. A shortcut that is not `ndid_<number>`, or a chat that cannot be
+found, opens the list; channel posts, whose notifications have no shortcut, open the list too (Lumen
+starts at `/`). While it looks, the loading screen is shown. In demo mode the fictional chats answer to
+their own dialog ids (`ndid_7700101` is Maya Chen, `ndid_-1000000042` Library News).
+
 ## Development
 
 ```sh
@@ -403,6 +417,8 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
   - allowed-reaction choice and toggling, and list previews;
   - the demo client (no connection, allowed reactions, auto-reply with a push update);
   - where the list scrolls through a long message, step by step, in both directions;
+  - notification shortcuts: `ndid_<dialogId>` parsing and the mapping to chat ids (user, basic group,
+    supergroup/channel, garbage), and the GramJS lookup order;
   - voice search: name matching (accents, case, one-letter mistakes, prefixes, joined words, filler words,
     digits) and both speech paths (SpeechRecognition and `window.lumen.audio` with pause detection).
 - **E2E** (`tests/e2e/run.mjs`, keyboard only, Chromium and Firefox). It serves two builds like the Lumen
@@ -425,7 +441,9 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
     the first chat, partial text, a one-letter mistake, no accents, a contact without a chat (Bruno Lima,
     whose first message adds the chat to the list), no match and Try again, Done, Search again, no speech,
     Back aborting the recognizer, a recognizer refused as unavailable (the row then hidden, or
-    `window.lumen.audio` taking over), and pt-PT. Native recognizers are removed from every test page.
+    `window.lumen.audio` taking over), and pt-PT; and opening from a notification (`/notification/ndid_…` for
+    a user and a basic group in the list, a supergroup that is not, garbage and an unknown id, Back to the
+    list). Native recognizers are removed from every test page.
 - **Live** (`tests/live/transport.mjs`): the release build against Telegram's servers, with a random
   session and no account.
 

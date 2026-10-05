@@ -13,7 +13,8 @@ import {CustomFile} from 'telegram/client/uploads';
 import {StringSession} from 'telegram/sessions';
 import type {TelegramConfig} from '../config/lumenConfig';
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload, type VoiceNote} from './api';
-import {entityName, reactionsOf, toChat, toMessage, type Tl} from './convert';
+import {entityChat, entityName, reactionsOf, toChat, toMessage, type Tl} from './convert';
+import {dialogPeers, markedId, type DialogPeer, type NotificationDialog} from './dialogId';
 import {toTelegramError} from './errors';
 import type {AllowedReactions, Chat, ChatMessage, Contact} from './model';
 
@@ -143,6 +144,49 @@ export function sendVoiceNote(client: TelegramClient, entity: Entity | Api.TypeI
     ],
     workers: 1,
   });
+}
+
+/**
+ * The chat of a notification's dialog: an entity already known this session
+ * first, then Telegram (the user; a channel or supergroup, then a basic group).
+ * A lookup that fails (unknown id, no access hash) moves on to the next one.
+ */
+export async function findDialogChat(
+  dialog: NotificationDialog,
+  known: (chatId: string) => Entity | undefined,
+  fetch: (peer: DialogPeer) => Promise<Entity>,
+): Promise<{chat: Chat; entity: Entity} | null> {
+  const peers = dialogPeers(dialog);
+  for (const peer of peers) {
+    const entity = known(markedId(peer));
+    const chat = entityChat(entity, markedId(peer));
+    if (entity && chat) {
+      return {chat, entity};
+    }
+  }
+  for (const peer of peers) {
+    try {
+      const entity = await fetch(peer);
+      const chat = entityChat(entity, peerId(entity) ?? markedId(peer));
+      if (chat) {
+        return {chat, entity};
+      }
+    } catch {
+      // Not this kind of peer, or not reachable without an access hash.
+    }
+  }
+  return null;
+}
+
+function toPeer(peer: DialogPeer): Api.TypePeer {
+  switch (peer.type) {
+    case 'user':
+      return new Api.PeerUser({userId: bigInt(peer.id)});
+    case 'chat':
+      return new Api.PeerChat({chatId: bigInt(peer.id)});
+    case 'channel':
+      return new Api.PeerChannel({channelId: bigInt(peer.id)});
+  }
 }
 
 /** Connects with the configured session; rejects with a TelegramError (auth/network/…). */
@@ -413,6 +457,16 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
               : 'application/octet-stream';
         return {mimetype, bytes};
       }, MEDIA_TIMEOUT_MS),
+
+    resolveDialog: dialog =>
+      call(async () => {
+        const found = await findDialogChat(dialog, chatId => entities.get(chatId), peer => client.getEntity(toPeer(peer)));
+        if (found == null) {
+          return null;
+        }
+        remember(found.entity);
+        return found.chat;
+      }),
 
     onUpdate(listener) {
       listeners.add(listener);
