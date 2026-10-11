@@ -12,8 +12,8 @@ import {
   type ButtonHandle,
   type PageHandle,
 } from '@wearables-ui-toolkit/mrbd';
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent} from 'react';
-import {Navigate, useLocation, useNavigate, useParams} from 'react-router-dom';
+import {memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent} from 'react';
+import {Navigate, useLocation, useNavigate, useParams, type NavigateFunction} from 'react-router-dom';
 import {avatarFallback} from '../components/avatarFallback';
 import {MessageBubble} from '../components/MessageBubble';
 import {failureReason} from '../failure';
@@ -43,6 +43,8 @@ export function photoPath(chatId: string, messageId: string): string {
 export function ThreadPage() {
   const {chatId} = useParams();
   const {phase} = useChat();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   if (!chatId) {
     return <Navigate to="/" replace />;
@@ -50,8 +52,15 @@ export function ThreadPage() {
   if (phase.kind !== 'ready') {
     return <StatusPage phase={phase} />;
   }
-  return <Thread chatId={chatId} />;
+  const composerOpen =
+    location.state != null &&
+    typeof location.state === 'object' &&
+    'replyComposer' in location.state &&
+    location.state.replyComposer === true;
+  return <Thread chatId={chatId} pathname={location.pathname} locationKey={location.key} composerOpen={composerOpen} navigate={navigate} />;
 }
+
+type ThreadProps = {chatId: string; pathname: string; locationKey: string; composerOpen: boolean; navigate: NavigateFunction};
 
 /** Header height, measured once laid out and on resize; 0 until known. */
 function useHeaderHeight(pageRef: {current: PageHandle | null}): number {
@@ -82,11 +91,12 @@ function focusNewestBubble(list: HTMLElement | null | undefined) {
   }
 }
 
-function Thread({chatId}: {chatId: string}) {
+// A page stays rendered while the next one comes in, and every navigation
+// gives it a new location object; with primitives for props, the conversation
+// is not drawn again on its way out (Back to the list).
+const Thread = memo(function Thread({chatId, pathname, locationKey, composerOpen, navigate}: ThreadProps) {
   const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor, contactName} =
     useChat();
-  const location = useLocation();
-  const navigate = useNavigate();
   const chat = chatFor(chatId);
   // A contact found by voice search may have no conversation in the list yet.
   const savedName = chat?.name ?? contactName(chatId);
@@ -119,11 +129,6 @@ function Thread({chatId}: {chatId: string}) {
   );
   const [audio, toggleAudio] = useAudioPlayer(loadMedia, showAudioError);
 
-  const composerOpen =
-    location.state != null &&
-    typeof location.state === 'object' &&
-    'replyComposer' in location.state &&
-    location.state.replyComposer === true;
   const composerWasOpenRef = useRef(false);
   useLayoutEffect(() => {
     if (composerWasOpenRef.current && !composerOpen) {
@@ -138,10 +143,10 @@ function Thread({chatId}: {chatId: string}) {
     (message: ChatMessage | null) => {
       setQuoted(message);
       if (!composerOpen) {
-        navigate(location.pathname, {state: {replyComposer: true}});
+        navigate(pathname, {state: {replyComposer: true}});
       }
     },
-    [composerOpen, location.pathname, navigate],
+    [composerOpen, navigate, pathname],
   );
   const startReply = useCallback(() => openComposer(null), [openComposer]);
   const viewPhoto = useCallback(
@@ -170,7 +175,7 @@ function Thread({chatId}: {chatId: string}) {
   //   an older bubble and the restored scroll leaves newer ones (such as a voice
   //   note sent last time) under the rail, out of view and skipped by Up.
   useEffect(() => {
-    if (composerOpen || location.pathname !== `/chat/${encodeURIComponent(chatId)}`) {
+    if (composerOpen || pathname !== `/chat/${encodeURIComponent(chatId)}`) {
       return;
     }
     const fromVoice = returnTo.voice;
@@ -193,7 +198,7 @@ function Thread({chatId}: {chatId: string}) {
     });
     return () => window.cancelAnimationFrame(frame);
     // Once per showing of the conversation; new messages are revealed below.
-  }, [chatId, location.key, location.pathname, longMessages]);
+  }, [chatId, locationKey, pathname, longMessages]);
 
   const react = useCallback(
     (message: ChatMessage, emoji: string) => {
@@ -367,4 +372,4 @@ function Thread({chatId}: {chatId: string}) {
       </div>
     </Page>
   );
-}
+});
