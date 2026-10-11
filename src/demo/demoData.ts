@@ -78,7 +78,8 @@ function message(
 const me = (daysAgo: number, time: string, content: MessageContent, extra: Partial<DemoMessage> = {}) =>
   message(true, daysAgo, time, content, null, extra);
 const photo = (caption: string, url: string): Partial<DemoMessage> & {content: MessageContent} => ({
-  content: {kind: 'photo', text: caption},
+  // The demo pictures are 800 x 600.
+  content: {kind: 'photo', text: caption, width: 800, height: 600},
   media: {url, mimetype: 'image/webp'},
 });
 const voice = (): Partial<DemoMessage> & {content: MessageContent} => ({

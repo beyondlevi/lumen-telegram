@@ -5,10 +5,22 @@
 //
 // Before a page load, tests may set sessionStorage['fake-telegram-init'] to
 // JSON {connect: 'ok'|'auth'|'network'|'flood', downForMs, push: boolean,
-// mediaFails: boolean, extraChats: number} to script the connection; extraChats
-// adds that many older chats (35 messages each) for load tests, and lifts the
-// app's page size so the whole list comes in one getChats.
+// mediaFails: boolean, extraChats: number, photoDelayMs: number} to script the
+// connection; photoDelayMs delays photo downloads (getPhoto); extraChats
+// adds that many older chats (35 messages each, two of them photos) for load
+// tests, and lifts the app's page size so the whole list comes in one getChats.
+//
+// Photos are kept like Telegram keeps them: in sizes, here 'm' (fits 320 x 320)
+// and 'x' (fits 800 x 800), JPEGs made from the demo pictures, plus the
+// stripped 'i' preview that comes inside the message (content.preview, as the
+// GramJS client makes it).
 import photoTrailMap from '../../src/demo/assets/photo-trail-map.webp';
+import sketchM from '../fixtures/sketch-m.jpg';
+import sketchX from '../fixtures/sketch-x.jpg';
+import sketchI from '../fixtures/sketch-i.jpg?inline';
+import trailM from '../fixtures/trail-m.jpg';
+import trailX from '../fixtures/trail-x.jpg';
+import trailI from '../fixtures/trail-i.jpg?inline';
 import avatarHike from '../../src/demo/assets/avatar-hike.webp';
 import avatarMaya from '../../src/demo/assets/avatar-maya.webp';
 import voiceNote from '../../src/demo/assets/voice-note.ogg';
@@ -19,9 +31,15 @@ import {candidateChatIds} from '../../src/telegram/dialogId';
 import {decodeWaveform} from '../../src/telegram/waveform';
 import type {AllowedReactions, Chat, ChatMessage, Contact, MessageContent, ReactionSummary} from '../../src/telegram/model';
 
-type Init = {connect?: 'ok' | 'auth' | 'network' | 'flood'; downForMs?: number; push?: boolean; mediaFails?: boolean; extraChats?: number};
+type Init = {connect?: 'ok' | 'auth' | 'network' | 'flood'; downForMs?: number; push?: boolean; mediaFails?: boolean; extraChats?: number; photoDelayMs?: number};
 
-type FakeMessage = ChatMessage & {media?: {url: string; mimetype: string}};
+/**
+ * Media of a message: `url` is the file; a photo may also have Telegram's
+ * sizes ('m', 'x'). `thumbFails`: its small sizes fail to download (the photo
+ * in full still opens).
+ */
+type FakeMedia = {url: string; mimetype: string; sizes?: {m: string; x: string}; thumbFails?: boolean};
+type FakeMessage = ChatMessage & {media?: FakeMedia};
 type FakeChat = Omit<Chat, 'lastMessage' | 'timestamp'> & {messages: FakeMessage[]; allowed: AllowedReactions; avatar?: string};
 
 type Log = {
@@ -37,6 +55,8 @@ type Log = {
   resolves: string[];
   mediaRequests: {chatId: string; messageId: string}[];
   photoRequests: string[];
+  /** Photo downloads in a size (getPhoto): the side asked for, and the size served. */
+  photoDownloads: {chatId: string; messageId: string; side: number; served: string}[];
 };
 
 const STANDARD = ['👍', '❤', '🔥', '🤣', '😁', '😢', '😭', '🎉'];
@@ -55,8 +75,21 @@ function msg(chatId: string, fromMe: boolean, minutes: number, content: MessageC
   return {id: String(idCounter), chatId, fromMe, senderName: fromMe ? null : senderName, timestamp: minutesAgo(minutes), content, ...extra};
 }
 
+const base64Of = (dataUrl: string) => dataUrl.slice(dataUrl.indexOf(',') + 1);
+
+/** A photo message's content and media as Telegram has them: 800 x 600, sizes m and x, and the stripped preview. */
+export function telegramPhoto(caption: string, picture: 'trail' | 'sketch' = 'trail'): {content: MessageContent; media: FakeMedia} {
+  const [m, x, preview] = picture === 'trail' ? [trailM, trailX, trailI] : [sketchM, sketchX, sketchI];
+  return {
+    content: {kind: 'photo', text: caption, width: 800, height: 600, preview: base64Of(preview)},
+    media: {url: x, mimetype: 'image/jpeg', sizes: {m, x}},
+  };
+}
+
 function seed(): FakeChat[] {
   idCounter = 100;
+  const lunch = telegramPhoto('Foto do almoço', 'sketch');
+  const look = telegramPhoto('Olha isso');
   const text = (value: string): MessageContent => ({kind: 'text', text: value});
   const combinado = msg('1001', true, 60, text('Combinado, até amanhã'), null, {reactions: [{emoji: '👍', count: 1, mine: false}]});
   return [
@@ -81,7 +114,11 @@ function seed(): FakeChat[] {
       messages: [
         msg('-2002', false, 90, text('Almoço no domingo?'), 'Bruno Lima'),
         msg('-2002', true, 88, text('Eu vou'), null),
-        msg('-2002', false, 83, {kind: 'photo', text: 'Olha isso'}, 'Bruno Lima', {media: {url: photoTrailMap, mimetype: 'image/webp'}}),
+        // Yours, sent from another device (or an earlier session): Telegram's sizes, like anyone's.
+        msg('-2002', true, 87, lunch.content, null, {media: lunch.media}),
+        // Without size, preview or downloadable small size (an old client): the icon, then the photo in full.
+        msg('-2002', false, 85, {kind: 'photo', text: 'Sem miniatura'}, 'Bruno Lima', {media: {url: photoTrailMap, mimetype: 'image/webp', thumbFails: true}}),
+        msg('-2002', false, 83, look.content, 'Bruno Lima', {media: look.media}),
       ],
     },
     {
@@ -126,9 +163,14 @@ function extraChats(count: number): FakeChat[] {
     const id = String(3000 + index);
     const name = `Contact ${index + 1}`;
     const newest = 5000 + index * 60;
-    const messages = Array.from({length: 35}, (__, step) =>
-      msg(id, (34 - step) % 4 === 1, newest + (34 - step) * 2, {kind: 'text', text: FILLER[(index + 34 - step) % FILLER.length]}, name),
-    );
+    const messages = Array.from({length: 35}, (__, step) => {
+      const age = 34 - step;
+      // Two photos among the newest messages: one received, one of yours.
+      const photo = age === 2 || age === 5 ? telegramPhoto(FILLER[3], age === 2 ? 'trail' : 'sketch') : null;
+      return photo
+        ? msg(id, age % 4 === 1, newest + age * 2, photo.content, name, {media: photo.media})
+        : msg(id, age % 4 === 1, newest + age * 2, {kind: 'text', text: FILLER[(index + age) % FILLER.length]}, name);
+    });
     const photo = index % 2 === 0 ? [avatarMaya, avatarHike][index % 4 === 0 ? 0 : 1] : undefined;
     return {
       id, name, isGroup: false, unreadCount: index % 3 === 0 ? 2 : 0,
@@ -167,8 +209,11 @@ function createController() {
   const init = readInit();
   const chats = [...seed(), ...extraChats(init.extraChats ?? 0)];
   const listeners = new Set<(update: ChatUpdate) => void>();
-  const log: Log = {connects: 0, sent: [], voice: [], photos: [], reactions: [], reads: [], resolves: [], mediaRequests: [], photoRequests: []};
-  const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false, photoFailures: 0, photoDelayMs: 0};
+  const log: Log = {connects: 0, sent: [], voice: [], photos: [], reactions: [], reads: [], resolves: [], mediaRequests: [], photoRequests: [], photoDownloads: []};
+  const state = {
+    downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false, photoFailures: 0, photoDelayMs: 0,
+    downloadDelayMs: init.photoDelayMs ?? 0, downloadFails: false,
+  };
 
   // Saved contacts: the people with a chat, and Bruno Lima, who has none yet.
   const contacts: Contact[] = [
@@ -229,6 +274,24 @@ function createController() {
       chat.messages.push(msg(chatId, false, 0, {kind: 'text', text}, senderName));
       chat.unreadCount += 1;
       notify(chatId);
+    },
+    /** A photo message arrives (Telegram's sizes and preview); `fromMe`: yours, from another device. */
+    incomingPhoto(chatId: string, caption: string, senderName: string | null, fromMe = false) {
+      const chat = chatFor(chatId);
+      const photo = telegramPhoto(caption);
+      chat.messages.push(msg(chatId, fromMe, 0, photo.content, senderName, {media: photo.media}));
+      if (!fromMe) chat.unreadCount += 1;
+      notify(chatId);
+    },
+    /** A text message of yours (from another device) arrives. */
+    outgoing(chatId: string, text: string) {
+      chatFor(chatId).messages.push(msg(chatId, true, 0, {kind: 'text', text}, null));
+      notify(chatId);
+    },
+    /** Photo downloads (getPhoto) take `delayMs`; with `fails`, they fail. */
+    setPhotoDownload({delayMs = 0, fails = false}: {delayMs?: number; fails?: boolean}) {
+      state.downloadDelayMs = delayMs;
+      state.downloadFails = fails;
     },
     /** Someone reacts to a message (pushed as an update). */
     react(chatId: string, messageId: string, emoji: string) {
@@ -305,7 +368,9 @@ function createController() {
             height: size?.height ?? null,
           });
           const url = URL.createObjectURL(new Blob([photo.bytes as BlobPart], {type: photo.mimetype}));
-          const sent = msg(chatId, true, 0, {kind: 'photo', text: photo.caption}, null, {media: {url, mimetype: photo.mimetype}});
+          // Telegram's copy has the photo's size (its sizes are served from the file itself here).
+          const shape = size ? {width: size.width, height: size.height} : {};
+          const sent = msg(chatId, true, 0, {kind: 'photo', text: photo.caption, ...shape}, null, {media: {url, mimetype: photo.mimetype}});
           chatFor(chatId).messages.push(sent);
           listChat(chatFor(chatId));
           return copy(sent);
@@ -365,6 +430,18 @@ function createController() {
           const media = chatFor(chatId).messages.find(item => item.id === messageId)?.media;
           if (state.mediaFails || !media) throw new TelegramError('rejected', 'MEDIA_EMPTY', 'MEDIA_EMPTY');
           return {mimetype: media.mimetype, url: new URL(media.url, location.href).href};
+        },
+        async getPhoto(chatId, messageId, side): Promise<MediaPayload> {
+          await guard();
+          const media = chatFor(chatId).messages.find(item => item.id === messageId)?.media;
+          const served = media?.sizes ? (side <= 320 ? 'm' : 'x') : 'file';
+          log.photoDownloads.push({chatId, messageId, side, served});
+          await new Promise(resolve => setTimeout(resolve, state.downloadDelayMs));
+          if (state.mediaFails || state.downloadFails || !media || (media.thumbFails && side <= 320)) {
+            throw new TelegramError('rejected', 'MEDIA_EMPTY', 'MEDIA_EMPTY');
+          }
+          const url = media.sizes ? media.sizes[side <= 320 ? 'm' : 'x'] : media.url;
+          return {mimetype: media.mimetype, url: new URL(url, location.href).href};
         },
         async resolveDialog(dialog) {
           await guard();

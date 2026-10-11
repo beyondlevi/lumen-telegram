@@ -54,6 +54,23 @@ function textOf(value: unknown): string {
   return '';
 }
 
+/**
+ * A photo's size in pixels: that of its largest size (photoSize,
+ * photoSizeProgressive or photoCachedSize carry w and h; the stripped and path
+ * sizes do not).
+ */
+export function photoSize(photo: Tl | undefined): {width?: number; height?: number} {
+  let best: {width: number; height: number} | null = null;
+  for (const size of (photo?.sizes as Tl[] | undefined) ?? []) {
+    const width = typeof size.w === 'number' ? size.w : 0;
+    const height = typeof size.h === 'number' ? size.h : 0;
+    if (width > 0 && height > 0 && (best == null || width * height > best.width * best.height)) {
+      best = {width, height};
+    }
+  }
+  return best ?? {};
+}
+
 /** Kind and text of a message; null for messages that are not chat content. */
 export function messageContent(value: object): MessageContent | null {
   const message = value as Tl;
@@ -67,7 +84,7 @@ export function messageContent(value: object): MessageContent | null {
   }
   switch (media.className) {
     case 'MessageMediaPhoto':
-      return {kind: 'photo', text};
+      return {kind: 'photo', text, ...photoSize(media.photo as Tl | undefined)};
     case 'MessageMediaDocument': {
       const document = media.document as Tl | undefined;
       if (!document || document.className !== 'Document') {

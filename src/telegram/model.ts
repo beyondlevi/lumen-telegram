@@ -22,6 +22,15 @@ export type MessageContent = {
   seconds?: number;
   /** Audio: a voice note (recorded message) rather than an audio file such as music. */
   voice?: boolean;
+  /** Photo: its size in pixels (the largest one Telegram has), for the shape of its thumbnail. */
+  width?: number;
+  height?: number;
+  /**
+   * Photo: the tiny thumbnail that comes inside the message (Telegram's
+   * stripped size, a few dozen pixels), as a base64 JPEG; shown only until
+   * the real thumbnail is downloaded. Never stored.
+   */
+  preview?: string;
 };
 
 export type ReactionSummary = {

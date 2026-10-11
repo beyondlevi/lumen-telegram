@@ -35,6 +35,15 @@ export function loadChatCache(account: string): ChatCache | null {
   }
 }
 
+/** The message without its photo preview: a few hundred bytes each, never stored. */
+export function withoutPreview(message: ChatMessage): ChatMessage {
+  if (message.content.preview == null) {
+    return message;
+  }
+  const {preview: _preview, ...content} = message.content;
+  return {...message, content};
+}
+
 export function saveChatCache(account: string, chats: Chat[], threads: Record<string, ChatMessage[]>): void {
   const kept: Record<string, ChatMessage[]> = {};
   for (const chat of chats) {
@@ -43,10 +52,15 @@ export function saveChatCache(account: string, chats: Chat[], threads: Record<st
     }
     const messages = threads[chat.id];
     if (messages?.length) {
-      kept[chat.id] = messages.filter(message => !message.pending).slice(-MAX_MESSAGES);
+      kept[chat.id] = messages.filter(message => !message.pending).slice(-MAX_MESSAGES).map(withoutPreview);
     }
   }
-  const stored: Stored = {account, savedAt: Date.now(), chats, threads: kept};
+  const stored: Stored = {
+    account,
+    savedAt: Date.now(),
+    chats: chats.map(chat => (chat.lastMessage ? {...chat, lastMessage: withoutPreview(chat.lastMessage)} : chat)),
+    threads: kept,
+  };
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(stored));
   } catch {

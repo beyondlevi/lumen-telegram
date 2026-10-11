@@ -63,6 +63,12 @@ export type ChatApi = {
   getProfilePhoto(chatId: string): Promise<MediaPayload | null>;
   /** Photo or voice message media. */
   getMedia(chatId: string, messageId: string): Promise<MediaPayload>;
+  /**
+   * A photo message's photo in the smallest of Telegram's sizes that is at
+   * least `side` pixels on its longest side (else its largest): about 320 for
+   * a bubble's thumbnail, 800 for the photo in full.
+   */
+  getPhoto(chatId: string, messageId: string, side: number): Promise<MediaPayload>;
   /** The chat a notification points to, looked up on Telegram; null when it cannot be opened. */
   resolveDialog(dialog: NotificationDialog): Promise<Chat | null>;
   /** Push updates; returns the unsubscribe function. */

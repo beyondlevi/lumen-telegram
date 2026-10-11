@@ -96,6 +96,14 @@ export function createDemoClient(): ChatApi {
       listener({chatId});
     }
   };
+  const mediaOf = async (chatId: string, messageId: string): Promise<MediaPayload> => {
+    await wait(MEDIA_DELAY_MS);
+    const media = chatFor(chatId).messages.find(message => message.id === messageId)?.media;
+    if (!media) {
+      throw new TelegramError('rejected', 'The message has no media');
+    }
+    return {mimetype: media.mimetype, url: assetUrl(media.url)};
+  };
   const allowedFor = (chat: StoredChat): AllowedReactions =>
     chat.allowed ?? {kind: 'some', emojis: DEMO_STANDARD_REACTIONS};
 
@@ -200,14 +208,10 @@ export function createDemoClient(): ChatApi {
       return avatar ? {mimetype: 'image/webp', url: assetUrl(avatar)} : null;
     },
 
-    async getMedia(chatId, messageId): Promise<MediaPayload> {
-      await wait(MEDIA_DELAY_MS);
-      const media = chatFor(chatId).messages.find(message => message.id === messageId)?.media;
-      if (!media) {
-        throw new TelegramError('rejected', 'The message has no media');
-      }
-      return {mimetype: media.mimetype, url: assetUrl(media.url)};
-    },
+    getMedia: mediaOf,
+
+    // One size of each demo picture: the app draws it smaller.
+    getPhoto: (chatId, messageId) => mediaOf(chatId, messageId),
 
     onUpdate(listener) {
       listeners.add(listener);

@@ -14,6 +14,7 @@ import {StringSession} from 'telegram/sessions';
 import type {TelegramConfig} from '../config/lumenConfig';
 import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload, type PhotoUpload, type VoiceNote} from './api';
 import {entityChat, entityName, reactionsOf, toChat, toMessage, type Tl} from './convert';
+import {photoSizeFor} from './photoSizes';
 import {dialogPeers, markedId, type DialogPeer, type NotificationDialog} from './dialogId';
 import {toTelegramError} from './errors';
 import type {AllowedReactions, Chat, ChatMessage, Contact} from './model';
@@ -25,6 +26,8 @@ const CALL_TIMEOUT_MS = 20000;
 /** Media downloads can take longer on the phone's connection. */
 const MEDIA_TIMEOUT_MS = 45000;
 const REACH_TIMEOUT_MS = 6000;
+/** GramJS messages kept for their media (file location and reference), so a download needs no lookup first. */
+const KEPT_MESSAGES = 300;
 
 export function webHost(dcId: number): string | null {
   const name = WEB_HOSTS[dcId];
@@ -114,6 +117,41 @@ function toBytes(value: unknown): Uint8Array | null {
     return new Uint8Array(value);
   }
   return null;
+}
+
+/**
+ * The message with its photo's stripped thumbnail (the 'i' size, inside the
+ * message) made a JPEG again, as `content.preview`: shown in the bubble only
+ * until the real thumbnail is downloaded.
+ */
+export function withPreview(message: ChatMessage, raw: object | null | undefined): ChatMessage {
+  const media = raw instanceof Api.Message ? raw.media : undefined;
+  const photo = media instanceof Api.MessageMediaPhoto ? media.photo : undefined;
+  const stripped = photo instanceof Api.Photo ? photo.sizes.find(size => size instanceof Api.PhotoStrippedSize) : undefined;
+  if (!(stripped instanceof Api.PhotoStrippedSize) || message.content.kind !== 'photo') {
+    return message;
+  }
+  const jpeg = utils.strippedPhotoToJpg(Buffer.from(stripped.bytes));
+  return {...message, content: {...message.content, preview: jpeg.toString('base64')}};
+}
+
+/**
+ * Downloads a photo message's photo in the size that fits `side` (see
+ * photoSizeFor): GramJS fetches that size (an InputPhotoFileLocation with its
+ * type as thumb_size) instead of the largest one.
+ */
+export async function downloadPhotoSize(
+  client: Pick<TelegramClient, 'downloadMedia'>,
+  message: Api.Message,
+  side: number,
+): Promise<Uint8Array | null> {
+  const media = message.media;
+  const photo = media instanceof Api.MessageMediaPhoto ? media.photo : undefined;
+  if (!(photo instanceof Api.Photo)) {
+    throw new TelegramError('rejected', 'The message has no photo');
+  }
+  const index = photoSizeFor(photo.sizes, side);
+  return toBytes(await client.downloadMedia(message, index < 0 ? {} : {thumb: photo.sizes[index]}));
 }
 
 /**
@@ -289,6 +327,29 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
     return message;
   };
 
+  // The messages last loaded (or sent), kept for their media, the oldest dropped first.
+  const rawMessages = new Map<string, Api.Message>();
+  const keepRaw = (chatId: string, message: Api.Message) => {
+    const key = `${chatId}:${message.id}`;
+    rawMessages.delete(key);
+    rawMessages.set(key, message);
+    while (rawMessages.size > KEPT_MESSAGES) {
+      rawMessages.delete(rawMessages.keys().next().value as string);
+    }
+  };
+  /** The message, as loaded, or looked up on Telegram (`fresh`: always looked up, for a new file reference). */
+  const messageFor = async (chatId: string, messageId: string, fresh = false): Promise<Api.Message | undefined> => {
+    const known = fresh ? undefined : rawMessages.get(`${chatId}:${messageId}`);
+    if (known) {
+      return known;
+    }
+    const message = await fetchMessage(await entityFor(chatId), messageId);
+    if (message) {
+      keepRaw(chatId, message);
+    }
+    return message;
+  };
+
   const handler = (update: object) => {
     const chatId = chatOfUpdate(update);
     if (chatId === null) {
@@ -359,13 +420,16 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
       call(async () => {
         const entity = await entityFor(chatId);
         const messages = await client.getMessages(entity, {limit});
+        const converted: ChatMessage[] = [];
         for (const message of messages) {
           remember(message.sender);
+          keepRaw(chatId, message);
+          const model = toMessage(message, {chatId, peerName: nameOfPeer});
+          if (model) {
+            converted.push(withPreview(model, message));
+          }
         }
-        return messages
-          .map(message => toMessage(message, {chatId, peerName: nameOfPeer}))
-          .filter((message): message is ChatMessage => message != null)
-          .reverse();
+        return converted.reverse();
       }),
 
     sendText: (chatId, text, replyToId) =>
@@ -399,7 +463,8 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
         if (!message) {
           throw new TelegramError('server', 'Telegram did not return the sent photo');
         }
-        return message;
+        keepRaw(chatId, sent);
+        return withPreview(message, sent);
       }, MEDIA_TIMEOUT_MS),
 
     sendReaction: (chatId, messageId, emoji) =>
@@ -457,10 +522,35 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
         return bytes ? {mimetype: 'image/jpeg', bytes} : null;
       }, MEDIA_TIMEOUT_MS),
 
+    getPhoto: (chatId, messageId, side) =>
+      call(async (): Promise<MediaPayload> => {
+        let message = await messageFor(chatId, messageId);
+        if (!message) {
+          throw new TelegramError('rejected', 'The message has no media');
+        }
+        let bytes: Uint8Array | null;
+        try {
+          bytes = await downloadPhotoSize(client, message, side);
+        } catch (error) {
+          // A kept message's file reference expires after a while: look it up again, once.
+          if (!(error instanceof Error && /FILE_REFERENCE/.test(error.message))) {
+            throw error;
+          }
+          message = await messageFor(chatId, messageId, true);
+          if (!message) {
+            throw error;
+          }
+          bytes = await downloadPhotoSize(client, message, side);
+        }
+        if (!bytes) {
+          throw new TelegramError('server', 'The photo download was empty');
+        }
+        return {mimetype: 'image/jpeg', bytes};
+      }, MEDIA_TIMEOUT_MS),
+
     getMedia: (chatId, messageId) =>
       call(async (): Promise<MediaPayload> => {
-        const entity = await entityFor(chatId);
-        const message = await fetchMessage(entity, messageId);
+        const message = await messageFor(chatId, messageId);
         const media = message?.media;
         if (!message || !media) {
           throw new TelegramError('rejected', 'The message has no media');
