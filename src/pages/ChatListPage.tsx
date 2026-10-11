@@ -14,6 +14,7 @@ import {KeptPage} from '../components/KeptPage';
 import {chatDisplayName, chatPreview, formatListTime} from '../format';
 import {t} from '../i18n/strings';
 import {useVoiceInput} from '../search/useVoiceInput';
+import {ROWS_AHEAD, useListWindow} from '../state/useListWindow';
 import {useReturnOrder} from '../state/useReturnOrder';
 import {whenIdle} from '../state/whenIdle';
 import {useChat} from '../ChatProvider';
@@ -132,17 +133,24 @@ export function ChatList() {
         key => key != null && (key === VOICE_ROW || rows.some(chat => chat.id === key)),
       ) ?? null)
     : null;
-  const shownRows = rows;
+  const returnIndex = returnTo == null ? -1 : rows.findIndex(chat => chat.id === returnTo);
+  const listWindow = useListWindow(rows.length, returnIndex < 0 ? 0 : returnIndex + 1 + ROWS_AHEAD);
+  const shownRows = rows.slice(0, listWindow.count);
 
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const open = useCallback((chatId: string) => navigateRef.current(openChatPath(chatId)), []);
   const search = useCallback(() => navigateRef.current(SEARCH_PATH), []);
-  const rowFocused = useCallback((key: string) => {
-    lastFocused.current = key;
-  }, []);
+  const focusedIndex = listWindow.focused;
+  const rowFocused = useCallback(
+    (key: string, index: number) => {
+      lastFocused.current = key;
+      focusedIndex(index);
+    },
+    [focusedIndex],
+  );
 
-  // Profile pictures load once per chat, while the list is shown.
+  // Profile pictures load once per chat, for the rows rendered while the list is shown.
   useEffect(() => {
     if (!shown) {
       return;
