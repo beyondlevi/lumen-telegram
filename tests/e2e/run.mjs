@@ -102,6 +102,34 @@ async function waitForText(page, text, timeout = 10000) {
   }
 }
 
+/** Waits until a bubble whose label matches is in the conversation. */
+async function waitForBubble(page, pattern, timeout = 10000) {
+  await page.waitForFunction(
+    source => [...document.querySelectorAll('.message-stack [aria-label]')].some(element => !element.closest('[aria-hidden="true"]') && new RegExp(source).test(element.getAttribute('aria-label') ?? '')),
+    pattern.source,
+    {timeout},
+  );
+}
+
+/** The photo boxes of the conversation: what each shows (the image's source kind and size, or the icon) and its shape. */
+async function photoBoxes(page) {
+  return page.$$eval('.thread-shell .message-row', rows =>
+    rows
+      .filter(row => row.querySelector('.photo-box') != null)
+      .map(row => {
+        const box = row.querySelector('.photo-box');
+        const image = box.querySelector('img');
+        const rect = box.getBoundingClientRect();
+        return {
+          label: row.querySelector('[aria-label]')?.getAttribute('aria-label') ?? '',
+          shows: image == null ? 'icon' : image.naturalWidth > 0 ? `${image.src.split(':')[0]} ${image.naturalWidth}x${image.naturalHeight}` : 'loading',
+          shape: Math.round((rect.width / rect.height) * 100),
+          top: Math.round(rect.top),
+        };
+      }),
+  );
+}
+
 async function rowLabels(page) {
   return page.$$eval('[role="button"][aria-label]', elements =>
     elements.filter(element => !element.closest('[aria-hidden="true"]')).map(element => element.getAttribute('aria-label')),
@@ -334,7 +362,9 @@ async function demoFlow(browser, label, appUrl = APP, {audioOutput = true} = {})
     await step(toReply, 300, '03-group', async () => {
       assert.match(page.url(), new RegExp(encodeURIComponent(HIKE)));
       assert.equal(await activeLabel(page), 'div|Reply');
-      for (const text of ['Hike Crew', 'Priya Nair', 'Leo Park', 'Photo: Trail map', 'Count me in.']) await waitForText(page, text);
+      for (const text of ['Hike Crew', 'Priya Nair', 'Leo Park', 'Trail map', 'Count me in.']) await waitForText(page, text);
+      // The demo photo's thumbnail is drawn from the packaged picture.
+      await page.waitForFunction(() => document.querySelector('.thread-shell .photo-box-image')?.naturalWidth > 0, null, {timeout: 10000});
     });
     await step(['ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp'], 500, '04-group-reactions', async () => {
       assert.match(await activeLabel(page), /Me! Leaving at 7\., .*reactions 👍 2, ❤️ 1$/);
@@ -669,7 +699,7 @@ async function mediaFlow(browser, {audioOutput}) {
   const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
   try {
     await page.goto(`${FAKE_APP}/chat/${FAMILY}`);
-    await waitForText(page, 'Photo: Olha isso');
+    await waitForBubble(page, /Photo: Olha isso/);
     await page.waitForTimeout(800);
     assert.ok((await loadedImages(page)).length >= 1, 'header photo');
     // Família accepts 👍 ❤ 🤣: 🤣 stands in for 😂 and 😭 is disabled.
@@ -683,7 +713,11 @@ async function mediaFlow(browser, {audioOutput}) {
     await press(page, 'Enter');
     await page.waitForURL(/\/photo\//);
     await page.waitForFunction(() => document.querySelector('.photo-image')?.naturalWidth > 0, null, {timeout: 8000});
-    assert.equal((await fake(page, () => window.__fakeTelegram.log.mediaRequests)).length, 1, 'downloaded on open');
+    assert.deepEqual(
+      (await fake(page, () => window.__fakeTelegram.log.photoDownloads)).filter(item => item.side > 320).map(item => item.served),
+      ['x'],
+      'downloaded on open, in the size that covers the screen',
+    );
     await page.screenshot({path: path.join(outDir, 'media-2-photo.png')});
     await press(page, 'Escape');
     await waitForFocus(page, /Photo: Olha isso/);
@@ -691,7 +725,7 @@ async function mediaFlow(browser, {audioOutput}) {
     // Download failure: error copy and Try again
     await page.evaluate(() => sessionStorage.setItem('fake-telegram-init', JSON.stringify({mediaFails: true})));
     await page.reload();
-    await waitForText(page, 'Photo: Olha isso');
+    await waitForBubble(page, /Photo: Olha isso/);
     await page.waitForTimeout(800);
     await press(page, 'ArrowDown');
     await press(page, 'ArrowLeft');
@@ -1106,7 +1140,9 @@ async function photoFlow(browser, label) {
     assert.equal(await page.evaluate(() => history.state?.usr?.photoSend ?? false), false);
     await page.waitForFunction(() => document.querySelectorAll('.sent-photo').length === 1);
     assert.match((await bubbles()).at(-1), /^Actions for message: You: Photo: Pôr do sol no parque, .*, Sending…$/);
-    await page.waitForFunction(() => document.querySelector('.sent-photo-thumbnail')?.naturalWidth > 0);
+    await page.waitForFunction(() => document.querySelector('.sent-photo .photo-box-image')?.naturalWidth > 0);
+    // Made here from the photo taken (1200 x 1600): 240 x 320.
+    assert.deepEqual(await page.$eval('.sent-photo .photo-box-image', image => [image.naturalWidth, image.naturalHeight]), [240, 320]);
     await shot('photo-3-sending');
     await waitForFocus(page, /^div\|Photo$/);
     for (let i = 0; i < 40 && !(await bubbles()).some(text => text.endsWith(', Sent')); i += 1) await page.waitForTimeout(100);
@@ -1426,7 +1462,7 @@ async function notificationFlow(browser, label) {
     // A basic group in the list (dialog -2002 is chat -2002).
     await openNotification(page, FAKE_APP, `ndid_${FAMILY}`);
     await page.waitForURL(`${FAKE_APP}/chat/${FAMILY}`);
-    await waitForText(page, 'Photo: Olha isso');
+    await waitForBubble(page, /Photo: Olha isso/);
     await waitForHeader(page, 'Família');
     await backToList(page, FAKE_APP);
 
@@ -1479,6 +1515,157 @@ async function notificationFlow(browser, label) {
   }
 }
 
+/**
+ * Thumbnails in Família: Bruno's photo (received) and yours from another
+ * device come with the stripped preview and are drawn at once from it, then
+ * their 'm' size (320 x 240) is downloaded; a photo without sizes or preview
+ * shows the icon. Then a photo arriving, the photo in full (loading, 600 px,
+ * Back to its bubble), the one without a thumbnail, and a failed download.
+ */
+async function thumbnailsFlow(browser, label) {
+  const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
+  const shot = name => page.screenshot({path: path.join(outDir, `${label}-thumbnails-${name}.png`)});
+  const downloads = () => fake(page, () => window.__fakeTelegram.log.photoDownloads);
+  const download = value => fake(page, next => window.__fakeTelegram.setPhotoDownload(next), value);
+  const layer = () => page.$eval('.photo-view-layer', element => ({closed: element.classList.contains('photo-view-layer--closed'), inert: element.inert})).catch(() => null);
+  const openPhoto = async pattern => {
+    await page.evaluate(source => [...document.querySelectorAll('.message-stack [aria-label]')].filter(element => new RegExp(source).test(element.getAttribute('aria-label') ?? '')).pop()?.focus(), pattern.source);
+    await waitForFocus(page, pattern);
+    await press(page, 'Enter');
+    assert.equal(await activeLabel(page), 'div|View');
+    await press(page, 'Enter');
+    await page.waitForURL(/\/photo\//);
+  };
+  try {
+    // The first downloads are slow: the previews show meanwhile.
+    await page.goto(`${FAKE_APP}/`);
+    await page.evaluate(() => sessionStorage.setItem('fake-telegram-init', JSON.stringify({photoDelayMs: 1500})));
+    await page.goto(`${FAKE_APP}/chat/${FAMILY}`);
+    await waitForBubble(page, /Photo: Olha isso/);
+    await page.waitForFunction(() => document.querySelectorAll('.thread-shell .photo-box img').length >= 2);
+    await page.waitForTimeout(300);
+    const early = await photoBoxes(page);
+    assert.deepEqual(early.map(box => box.shows), ['data 40x30', 'icon', 'data 40x30'], `previews first: ${JSON.stringify(early)}`);
+    await shot('1-previews');
+    await page.waitForFunction(() => [...document.querySelectorAll('.thread-shell .photo-box img')].every(image => image.src.startsWith('blob:') && image.naturalWidth > 0), null, {timeout: 10000});
+    await page.waitForTimeout(300);
+    const loaded = await photoBoxes(page);
+    assert.deepEqual(loaded.map(box => box.shows), ['blob 320x240', 'icon', 'blob 320x240'], `thumbnails: ${JSON.stringify(loaded)}`);
+    assert.deepEqual(loaded.map(box => box.shape), [133, 133, 133], 'boxes in the photos\' shape (4:3; 4:3 when unknown)');
+    assert.deepEqual(loaded.map(box => box.top), early.map(box => box.top), 'nothing moved when the thumbnails arrived');
+    assert.match(loaded[0].label, /^Actions for message: You: Photo: Foto do almoço/, 'yours from another device');
+    assert.deepEqual(
+      (await downloads()).map(item => [item.side, item.served]),
+      [[320, 'm'], [320, 'file'], [320, 'm']],
+      'one download per photo, in the size that fits 320 (the one without sizes fails)',
+    );
+    await shot('2-both-ways');
+
+    // A photo arrives: its thumbnail follows.
+    await download({});
+    await fake(page, () => window.__fakeTelegram.incomingPhoto('-2002', 'Chegando', 'Bruno Lima'));
+    await waitForBubble(page, /Photo: Chegando/);
+    await page.waitForFunction(() => {
+      const boxes = [...document.querySelectorAll('.thread-shell .photo-box img')];
+      return boxes.length === 3 && boxes.at(-1).src.startsWith('blob:') && boxes.at(-1).naturalWidth === 320;
+    }, null, {timeout: 10000});
+    await shot('3-live');
+
+    // In full: loading, then 600 x 450 over the conversation; Back to its bubble.
+    await download({delayMs: 1500});
+    await openPhoto(/Photo: Olha isso/);
+    await waitForText(page, 'Loading photo');
+    assert.deepEqual(await layer(), {closed: false, inert: false});
+    assert.equal(await page.$eval('.kept-page:not(.chat-list)', element => element.inert), true, 'the conversation under it is inert');
+    await shot('4-loading');
+    await page.waitForFunction(() => document.querySelector('.photo-view-layer .photo-image')?.naturalWidth > 0, null, {timeout: 10000});
+    assert.deepEqual(await page.$eval('.photo-view-layer .photo-image', image => [image.naturalWidth, image.naturalHeight]), [600, 450], 'decoded at 600 px');
+    assert.deepEqual((await downloads()).at(-1), {chatId: FAMILY, messageId: (await downloads()).at(-1).messageId, side: 600, served: 'x'});
+    await shot('5-open');
+    await press(page, 'Escape');
+    await waitForFocus(page, /Photo: Olha isso/);
+    assert.match(page.url(), new RegExp(`/chat/${FAMILY}$`));
+    await page.waitForFunction(() => document.querySelector('.photo-view-layer') == null, null, {timeout: 5000});
+
+    // Without a thumbnail: the icon, and the photo still opens.
+    await download({});
+    await openPhoto(/Photo: Sem miniatura/);
+    await page.waitForFunction(() => document.querySelector('.photo-view-layer .photo-image')?.naturalWidth > 0, null, {timeout: 10000});
+    assert.equal(await page.$eval('.photo-view-layer .photo-image', image => Math.max(image.naturalWidth, image.naturalHeight)), 600);
+    await press(page, 'Escape');
+    await waitForFocus(page, /Photo: Sem miniatura/);
+
+    // A failed download: the error, Try again with the focus, then the photo.
+    await download({fails: true});
+    await openPhoto(/Photo: Olha isso/);
+    await waitForText(page, "Couldn't load the photo");
+    await waitForFocus(page, /^div\|Try again$/);
+    await shot('6-error');
+    await download({});
+    await press(page, 'Enter');
+    await page.waitForFunction(() => document.querySelector('.photo-view-layer .photo-image')?.naturalWidth > 0, null, {timeout: 10000});
+    await press(page, 'Escape');
+    await waitForFocus(page, /Photo: Olha isso/);
+    assert.deepEqual(problems, []);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * Up from the action rail goes to the newest message, also when it is a
+ * narrow one of yours (a photo, "Ok") under a wider one of yours and it
+ * reaches down to the rail: the toolkit's geometry alone chose the older one.
+ */
+async function upFromRailFlow(browser) {
+  const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
+  /** Lifts the list so the newest bubble ends `lift` px lower than at the end of the conversation. */
+  const lift = value =>
+    page.evaluate(by => {
+      let element = document.querySelector('.thread-shell .message-row');
+      while (element && !(element.scrollHeight > element.clientHeight + 5 && getComputedStyle(element).overflowY !== 'visible')) element = element.parentElement;
+      element.scrollTop = element.scrollHeight - element.clientHeight - by;
+    }, value);
+  const fromRail = async (button, value) => {
+    await page.evaluate(() => document.activeElement?.blur());
+    await lift(value);
+    await page.waitForTimeout(200);
+    await page.evaluate(title => [...document.querySelectorAll('.action-dock [tabindex]')].find(element => element.textContent.trim() === title || element.getAttribute('aria-label') === title)?.focus(), button);
+    await waitForFocus(page, new RegExp(`^div\\|${button}$`));
+    await page.waitForTimeout(300);
+    const newestBottom = await page.evaluate(() => Math.round([...document.querySelectorAll('.thread-shell .message-row [aria-haspopup="menu"]')].at(-1).getBoundingClientRect().bottom));
+    await press(page, 'ArrowUp');
+    await page.waitForTimeout(300);
+    return {label: await activeLabel(page), newestBottom};
+  };
+  try {
+    await page.goto(`${FAKE_APP}/chat/${ANA}`);
+    await waitForBubble(page, /Levo o projetor/);
+    await fake(page, () => {
+      window.__fakeTelegram.outgoing('1001', 'Did you get the files I sent yesterday? The second one has the new numbers and the photos from the visit.');
+      window.__fakeTelegram.incomingPhoto('1001', '', null, true);
+    });
+    await waitForBubble(page, /^Actions for message: You: Photo, /);
+    await page.waitForTimeout(800);
+    const railTop = await page.$eval('.action-dock', element => Math.round(element.getBoundingClientRect().top));
+    for (const [button, value] of [['Reply', 0], ['Reply', 60], ['Reply', 100], ['Photo', 60]]) {
+      const result = await fromRail(button, value);
+      assert.match(result.label, /^div\|Actions for message: You: Photo, /, `Up from ${button}, newest bubble ending at ${result.newestBottom} (rail at ${railTop}): ${result.label}`);
+    }
+    // The same with a short text of yours last.
+    await fake(page, () => window.__fakeTelegram.outgoing('1001', 'Ok'));
+    await waitForBubble(page, /^Actions for message: You: Ok, /);
+    await page.waitForTimeout(800);
+    for (const value of [0, 60]) {
+      const result = await fromRail('Reply', value);
+      assert.match(result.label, /^div\|Actions for message: You: Ok, /, `Up from Reply with "Ok" last, lifted ${value}: ${result.label}`);
+    }
+    assert.deepEqual(problems, []);
+  } finally {
+    await context.close();
+  }
+}
+
 async function run() {
   const releaseServer = await startStaticServer(path.join(root, 'dist'), 4173);
   const fakeServer = await startStaticServer(path.join(root, 'dist-e2e'), 4174);
@@ -1502,6 +1689,8 @@ async function run() {
         });
         await test(`[${name}] Back to a long list: kept mounted, focus on the chat; rows and messages in windows`, () => keptListFlow(browser));
         await test(`[${name}] photos: take, caption, send, sending/sent/not sent, Try again, Cancel, Back, Retake`, () => photoFlow(browser, name));
+        await test(`[${name}] photo thumbnails (preview, then 320 px; yours, received, live, none), a photo in full (loading, 600 px, Back to its bubble), a failed download`, () => thumbnailsFlow(browser, name));
+        await test(`[${name}] Up from the action rail lands on the newest message (a narrow one of yours reaching the rail)`, () => upFromRailFlow(browser));
         await test(`[${name}] voice search: entry point, SpeechRecognition and window.lumen.audio, fuzzy names, contacts, no match, fallback`, () => voiceSearchFlow(browser, name));
         await test(`[${name}] long messages (first, middle, last): Down/Up scroll through each before moving on`, () => longMessagesFlow(browser, name));
         await test(`[${name}] opening from a notification: user, basic group, cached, supergroup outside the list, unknown and garbage ids, demo, Back to the list`, () => notificationFlow(browser, name));

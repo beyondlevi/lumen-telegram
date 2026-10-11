@@ -29,9 +29,20 @@ through WebSocket, with no server in between.
 - **Conversation**: the 30 most recent messages, starting below the header, with the chat's photo in the
   header and sender names in groups. Videos, stickers, documents, locations, contacts and polls show a
   marker ("Video", "Document: …"); service messages (joins, title changes) are left out.
-- **Photos**: Enter on a photo opens its menu with **View** first. View downloads the photo and shows it
-  full screen on the dark window background, with a loader while it downloads and an error with
-  **Try again** if it fails. Back returns to the same bubble.
+- **Photo thumbnails**: every photo bubble (received, sent from another device or an earlier session, or
+  sent from here) shows its thumbnail in a box with the photo's proportions (its size from the message,
+  4:3 when unknown, so the bubble never changes size when the image arrives), with the caption below.
+  Telegram keeps each photo in several sizes (see "Thumbnails" under Telegram over MTProto): the bubble
+  downloads the one that fits 320 x 320 (`m`), only for bubbles that are rendered, two at a time, once per
+  photo; the last 40 are kept in memory and released after. Until it arrives, the bubble shows the tiny
+  preview that comes inside the message (the stripped size, a few dozen pixels), or an image icon when
+  there is none. A photo you sent this session shows the 320 px thumbnail made on the device. Previews and
+  thumbnails are never written to the localStorage cache.
+- **Photos**: Enter on a photo opens its menu with **View** first. View downloads the photo in the size
+  that covers the screen (`x`, 800 px) and shows it decoded at 600 px at most, on the dark window
+  background, with a loader while it downloads and an error with **Try again** if it fails. It opens over
+  the conversation, which stays as it was, and Back returns to the same bubble; the image is released when
+  the photo closes. A photo without a thumbnail opens the same way.
 - **Sending photos**: **Photo** (the camera icon) opens the camera: on Lumen, a file input
   (`accept="image/*"`) opens Lumen's capture screen, whose index tap takes the photo and whose middle tap
   cancels; the page gets a JPEG of 1200 x 1600 (in a desktop browser, a file picker). The photo then shows
@@ -75,7 +86,10 @@ through WebSocket, with no server in between.
   bubble gets the focus and the end is revealed. Back from a photo or a transcript keeps the bubble you
   were on.
 - **Conversation actions**: a bottom rail with Reply, Voice (records a voice note when the host has
-  `window.lumen.audio`, disabled otherwise) and Photo (opens the camera).
+  `window.lumen.audio`, disabled otherwise) and Photo (opens the camera). Up from any of them goes to the
+  newest message. The toolkit picks an arrow's target by geometry, preferring what is straight above the
+  button: a newest bubble of yours (right-aligned and narrow, such as a photo or "Ok") whose bottom reached
+  the rail lost to an older, wider one, and Up skipped it. This predates photos (0.4.0 did it with "Ok").
 - **Reply**: the text field (the toolkit's `InputTextView`) appears only after Reply, as its own history
   entry, so Back closes it and focus returns to Reply. On the glasses, Enter on the field opens the
   platform's dictation composer. Right then moves to Send. After sending, the field closes.
@@ -106,6 +120,7 @@ The app uses only arrow keys, Enter, and Escape (the Neural Band / Rokid gesture
 | Conversation | Up / Down | Move between the message bubbles (scrolls history) and the action rail |
 | Conversation, on a message taller than the screen | Down / Up | Scroll through that message, half a screen per press, until its end (Down) or start (Up) is in view; the next press goes on to the next/previous message. A long message reached with Down opens at its start, with Up at its end |
 | Conversation | Down, Left | Always ends on Reply (on entry, focus is on Reply or on the newest bubble) |
+| Conversation | Up from Reply, Voice or Photo | The newest message, always (see below) |
 | Conversation | Enter on Reply | Opens the reply field, focused |
 | Reply field | Enter | On the glasses: opens the platform's dictation composer. In a desktop browser: sends |
 | Reply field | Right, then Enter | Send; the field closes |
@@ -227,7 +242,17 @@ Checked against the Telegram documentation and measured in headless Chromium and
   (photos: `inputMediaUploadedPhoto` with the caption as `message`; voice notes:
   `inputMediaUploadedDocument`, `audio/ogg`, `documentAttributeAudio` voice/duration/
   waveform; see [documentAttributeAudio](https://core.telegram.org/constructor/documentAttributeAudio) and
-  [files](https://core.telegram.org/api/files)), and the update stream. Transcription uses the Lumen host;
+  [files](https://core.telegram.org/api/files)), and the update stream.
+- **Thumbnails.** A photo (`photo`) carries its sizes ([files](https://core.telegram.org/api/files),
+  "PhotoSize.type values"): `s` fits 100 x 100, `m` 320 x 320, `x` 800 x 800, `y` 1280 x 1280 (often a
+  `photoSizeProgressive`), `w` 2560 x 2560, and `i`, a `photoStrippedSize` inside the message. The app
+  reads the photo's width and height from its largest size, rebuilds the stripped size into a JPEG with
+  GramJS's `utils.strippedPhotoToJpg` (the preview), and downloads one size with GramJS
+  `downloadMedia(message, {thumb: <that photoSize>})`, which sends `upload.getFile` with an
+  `inputPhotoFileLocation` whose `thumb_size` is that size's type (`photoSizeFor` in
+  `src/telegram/photoSizes.ts`: the smallest size at least as large as asked, else the largest; 320 for a
+  bubble, 600 for the photo in full). The messages last loaded are kept (300) so a download needs no
+  lookup first; an expired file reference (`FILE_REFERENCE_*`) looks the message up again once. Transcription uses the Lumen host;
   `messages.transcribeAudio` (Telegram Premium) is not used.
 
 ### Errors
@@ -280,8 +305,9 @@ marks the header **Offline** until a refresh succeeds.
   [teleproto](https://www.npmjs.com/package/teleproto) as the maintained fork. teleproto dropped GramJS's
   browser dependencies and has not been tried in a browser here.
 - **Profile photos** are downloaded once per session (two at a time) and kept in memory, not stored.
-- **Media**: only photos (View) and voice/audio messages (play) are downloaded. Videos, stickers and
-  documents keep their marker. Downloads live in memory for the session (the last 6).
+- **Media**: only photos (thumbnails, View) and voice/audio messages (play) are downloaded. Videos, stickers
+  and documents keep their marker (videos have no thumbnail yet). Audio lives in memory for the session
+  (the last 6), thumbnails the last 40, a photo in full only while it is open; nothing is stored.
 - **Secure context.** GramJS relies on Web Crypto; `http://127.0.0.1` (how the Lumen host serves packages)
   is a secure context in Chromium and Firefox.
 - **Channels** are read-only for most users: Reply returns "Not sent: not allowed in this chat".
@@ -465,7 +491,15 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
     conversation at once with "Sending…" and then "Sent", the photo checked on the scripted Telegram
     (`log.photos`: to Ana, the caption, the same bytes, 1200 x 1600), a refused upload (`setPhotoUpload`):
     "Not sent" and Try again, Cancel and Back sending nothing, and Retake keeping the caption, with a
-    2400 x 3200 photo reduced to 1200 x 1600); and Back to a long list (66 chats): the list stays mounted, hidden under the routes (`inert`,
+    2400 x 3200 photo reduced to 1200 x 1600, and the bubble's thumbnail made here at 240 x 320); photo
+    thumbnails in Família (`tests/fixtures/{trail,sketch}-{i,m,x}.jpg` are the scripted Telegram's sizes:
+    the previews first while the downloads are slow, then the `m` size at 320 x 240 for Bruno's photo and
+    for yours from another device, the icon for a photo without sizes, the boxes in the photos' shape and
+    nothing moving, one download per photo, a photo arriving), the photo in full (loading, the `x` size
+    decoded at 600 x 450, the conversation inert under it, Back to its bubble, the photo without a
+    thumbnail opening too, a failed download with the focus on Try again); Up from the rail landing on the
+    newest message (a photo of yours, then "Ok", under a wider message of yours, also lifted 60 and 100 px
+    toward the rail; it fails on 0.4.0); and Back to a long list (66 chats): the list stays mounted, hidden under the routes (`inert`,
     `aria-hidden`) and out of the D-pad's reach while the chat is open, and comes back with the same row elements
     and the focus on the chat; the list renders its first rows only and more as the focus goes down; the
     conversation renders its newest messages and more as the focus goes up. Native recognizers are removed
@@ -509,6 +543,12 @@ With the CPU throttled 4x: Back 2787 → 76 ms, opening 2055 → 1147 ms. With 4
 Sending photos (measured on 2026-10-11, same settings): Back from the send screen to the conversation takes
 86 ms (median of 5, 80-95), with the focus back on Photo, and Back to the list stays at 77 ms (77 ms
 before).
+
+Photo thumbnails (0.4.1, measured on 2026-10-11, same settings; each extra chat now has two photos with
+thumbnails among its newest messages): Back from a photo in full to its conversation takes 66 ms (median of
+5, 64-77; 980 ms in 0.4.0, where the photo was a page of its own and Back mounted the conversation
+again), with the focus back on the photo's bubble. Back to the list 69 ms (78 before), Back from the send
+screen 82 ms (89), opening a chat 1149 ms (1287), launch 1687 ms (1661).
 
 Voice notes and transcription (`tests/e2e/fakeAudio.mjs` injects a scripted `window.lumen.audio`, in
 Chromium and Firefox):
