@@ -24,6 +24,7 @@ import {
   useState,
   type CSSProperties,
   type FocusEvent,
+  type KeyboardEvent,
   type RefObject,
 } from 'react';
 import type {NavigateFunction} from 'react-router-dom';
@@ -39,6 +40,7 @@ import {useAudioPlayer} from '../state/useAudioPlayer';
 import {useHeaderHeight} from '../state/useHeaderHeight';
 import {useMessageWindow} from '../state/useListWindow';
 import {useLongMessageScroll} from '../state/useLongMessageScroll';
+import {focusNewestBubble, upToNewest} from '../state/newestBubble';
 import {useChat} from '../ChatProvider';
 import {recordPath} from './RecordPage';
 import {transcriptPath} from './TranscriptPage';
@@ -63,19 +65,6 @@ export type ThreadProps = {
   onTakePhoto: () => void;
   photoButtonRef: RefObject<ButtonHandle | null>;
 };
-
-/** Moves the focus from an older bubble of the list to the newest one. */
-function focusNewestBubble(list: HTMLElement | null | undefined) {
-  const focused = document.activeElement;
-  if (list == null || !(focused instanceof HTMLElement) || !list.contains(focused)) {
-    return;
-  }
-  const rows = list.querySelectorAll('.message-row');
-  const newest = rows[rows.length - 1]?.querySelector<HTMLElement>('[aria-haspopup="menu"]');
-  if (newest != null && !newest.contains(focused)) {
-    newest.focus({preventScroll: true});
-  }
-}
 
 // A page stays rendered while the next one comes in, and every navigation
 // gives it a new location object; with primitives for props, the conversation
@@ -146,6 +135,7 @@ export const Thread = memo(function Thread({chatId, pathname, locationKey, compo
     },
     [chatId, navigate],
   );
+  const onActionsKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => upToNewest(event, endRef.current?.parentElement), []);
   const transcribe = useCallback(
     (message: ChatMessage) => {
       returnTo.bubble = true;
@@ -335,7 +325,7 @@ export const Thread = memo(function Thread({chatId, pathname, locationKey, compo
           })}
           <div className="message-end" ref={endRef} />
         </VerticalList>
-        <div className="action-dock">
+        <div className="action-dock" onKeyDown={onActionsKeyDown}>
           {composerOpen ? (
             <div className="draft-input">
               <InputTextView
