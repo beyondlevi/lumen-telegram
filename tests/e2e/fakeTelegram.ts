@@ -5,7 +5,9 @@
 //
 // Before a page load, tests may set sessionStorage['fake-telegram-init'] to
 // JSON {connect: 'ok'|'auth'|'network'|'flood', downForMs, push: boolean,
-// mediaFails: boolean} to script the connection.
+// mediaFails: boolean, extraChats: number} to script the connection; extraChats
+// adds that many older chats (35 messages each) for load tests, and lifts the
+// app's page size so the whole list comes in one getChats.
 import photoTrailMap from '../../src/demo/assets/photo-trail-map.webp';
 import avatarHike from '../../src/demo/assets/avatar-hike.webp';
 import avatarMaya from '../../src/demo/assets/avatar-maya.webp';
@@ -17,7 +19,7 @@ import {candidateChatIds} from '../../src/telegram/dialogId';
 import {decodeWaveform} from '../../src/telegram/waveform';
 import type {AllowedReactions, Chat, ChatMessage, Contact, MessageContent, ReactionSummary} from '../../src/telegram/model';
 
-type Init = {connect?: 'ok' | 'auth' | 'network' | 'flood'; downForMs?: number; push?: boolean; mediaFails?: boolean};
+type Init = {connect?: 'ok' | 'auth' | 'network' | 'flood'; downForMs?: number; push?: boolean; mediaFails?: boolean; extraChats?: number};
 
 type FakeMessage = ChatMessage & {media?: {url: string; mimetype: string}};
 type FakeChat = Omit<Chat, 'lastMessage' | 'timestamp'> & {messages: FakeMessage[]; allowed: AllowedReactions; avatar?: string};
@@ -108,6 +110,34 @@ function seed(): FakeChat[] {
   ];
 }
 
+const FILLER = [
+  'Ok',
+  'See you at the station at eight, the train leaves at 8:20.',
+  'Did you get the files I sent yesterday? The second one has the new numbers and the photos from the visit.',
+  'Thanks!',
+  'Can we move the call to Thursday afternoon?',
+];
+
+/** Older chats after the seeded ones, for load tests: every 2nd with a photo, every 3rd unread. */
+function extraChats(count: number): FakeChat[] {
+  return Array.from({length: count}, (_, index): FakeChat => {
+    const id = String(3000 + index);
+    const name = `Contact ${index + 1}`;
+    const newest = 5000 + index * 60;
+    const messages = Array.from({length: 35}, (__, step) =>
+      msg(id, (34 - step) % 4 === 1, newest + (34 - step) * 2, {kind: 'text', text: FILLER[(index + 34 - step) % FILLER.length]}, name),
+    );
+    const photo = index % 2 === 0 ? [avatarMaya, avatarHike][index % 4 === 0 ? 0 : 1] : undefined;
+    return {
+      id, name, isGroup: false, unreadCount: index % 3 === 0 ? 2 : 0,
+      // A query per chat, so each photo is a separate download and decode, as on a real account.
+      hasPhoto: photo != null, photoKey: photo ? `extra-${index}` : undefined, avatar: photo ? `${photo}?chat=${index}` : undefined,
+      allowed: {kind: 'some', emojis: STANDARD},
+      messages,
+    };
+  });
+}
+
 function readInit(): Init {
   try {
     return JSON.parse(sessionStorage.getItem('fake-telegram-init') ?? '{}') as Init;
@@ -118,7 +148,7 @@ function readInit(): Init {
 
 function createController() {
   const init = readInit();
-  const chats = seed();
+  const chats = [...seed(), ...extraChats(init.extraChats ?? 0)];
   const listeners = new Set<(update: ChatUpdate) => void>();
   const log: Log = {connects: 0, sent: [], voice: [], reactions: [], reads: [], resolves: [], mediaRequests: [], photoRequests: []};
   const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false};
@@ -210,7 +240,7 @@ function createController() {
               return {...rest, lastMessage: last ? copy(last) : null, timestamp: last?.timestamp ?? null};
             })
             .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-            .slice(0, limit);
+            .slice(0, init.extraChats ? undefined : limit);
         },
         async getContacts() {
           await guard();
