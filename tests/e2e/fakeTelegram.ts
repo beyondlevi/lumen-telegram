@@ -29,6 +29,8 @@ type Log = {
   sent: {chatId: string; text: string; replyToId: string | null}[];
   /** Voice notes sent: size, first bytes ("OggS"), seconds, waveform values. */
   voice: {chatId: string; bytes: number; head: string; seconds: number; waveform: number[]}[];
+  /** Photos sent: size, first bytes (ffd8ff for a JPEG), its width and height, caption. */
+  photos: {chatId: string; bytes: number; head: string; mimetype: string; caption: string; width: number | null; height: number | null}[];
   reactions: {chatId: string; messageId: string; emoji: string | null}[];
   reads: {chatId: string; maxId: string}[];
   /** Notification dialogs looked up on Telegram (not found in the loaded list). */
@@ -138,6 +140,21 @@ function extraChats(count: number): FakeChat[] {
   });
 }
 
+/** Width and height of a JPEG, from its SOF segment (null when it is not one). */
+function jpegSize(bytes: Uint8Array): {width: number; height: number} | null {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  for (let offset = 2; offset + 9 < bytes.length; ) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return {height: (bytes[offset + 5] << 8) | bytes[offset + 6], width: (bytes[offset + 7] << 8) | bytes[offset + 8]};
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
 function readInit(): Init {
   try {
     return JSON.parse(sessionStorage.getItem('fake-telegram-init') ?? '{}') as Init;
@@ -150,8 +167,8 @@ function createController() {
   const init = readInit();
   const chats = [...seed(), ...extraChats(init.extraChats ?? 0)];
   const listeners = new Set<(update: ChatUpdate) => void>();
-  const log: Log = {connects: 0, sent: [], voice: [], reactions: [], reads: [], resolves: [], mediaRequests: [], photoRequests: []};
-  const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false};
+  const log: Log = {connects: 0, sent: [], voice: [], photos: [], reactions: [], reads: [], resolves: [], mediaRequests: [], photoRequests: []};
+  const state = {downUntil: Date.now() + (init.downForMs ?? 0), push: init.push !== false, mediaFails: init.mediaFails === true, pollFails: false, photoFailures: 0, photoDelayMs: 0};
 
   // Saved contacts: the people with a chat, and Bruno Lima, who has none yet.
   const contacts: Contact[] = [
@@ -229,6 +246,11 @@ function createController() {
     setPollFails(value: boolean) {
       state.pollFails = value;
     },
+    /** The next `failures` photo uploads fail; every upload takes `delayMs` (over the phone's internet). */
+    setPhotoUpload({failures = 0, delayMs = 0}: {failures?: number; delayMs?: number}) {
+      state.photoFailures = failures;
+      state.photoDelayMs = delayMs;
+    },
     api(): ChatApi {
       return {
         async getChats(limit) {
@@ -261,6 +283,29 @@ function createController() {
             waveform: voice.waveform ? decodeWaveform(voice.waveform) : [],
           });
           const sent = msg(chatId, true, 0, {kind: 'audio', text: '', seconds}, null);
+          chatFor(chatId).messages.push(sent);
+          listChat(chatFor(chatId));
+          return copy(sent);
+        },
+        async sendPhoto(chatId, photo) {
+          await guard();
+          await new Promise(resolve => setTimeout(resolve, state.photoDelayMs));
+          if (state.photoFailures > 0) {
+            state.photoFailures -= 1;
+            throw new TelegramError('server', 'Upload failed');
+          }
+          const size = jpegSize(photo.bytes);
+          log.photos.push({
+            chatId,
+            bytes: photo.bytes.length,
+            head: Array.from(photo.bytes.subarray(0, 3), byte => byte.toString(16).padStart(2, '0')).join(''),
+            mimetype: photo.mimetype,
+            caption: photo.caption,
+            width: size?.width ?? null,
+            height: size?.height ?? null,
+          });
+          const url = URL.createObjectURL(new Blob([photo.bytes as BlobPart], {type: photo.mimetype}));
+          const sent = msg(chatId, true, 0, {kind: 'photo', text: photo.caption}, null, {media: {url, mimetype: photo.mimetype}});
           chatFor(chatId).messages.push(sent);
           listChat(chatFor(chatId));
           return copy(sent);

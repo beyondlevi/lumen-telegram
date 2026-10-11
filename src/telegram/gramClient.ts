@@ -12,7 +12,7 @@ import {LogLevel} from 'telegram/extensions/Logger';
 import {CustomFile} from 'telegram/client/uploads';
 import {StringSession} from 'telegram/sessions';
 import type {TelegramConfig} from '../config/lumenConfig';
-import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload, type VoiceNote} from './api';
+import {TelegramError, type ChatApi, type ChatUpdate, type MediaPayload, type PhotoUpload, type VoiceNote} from './api';
 import {entityChat, entityName, reactionsOf, toChat, toMessage, type Tl} from './convert';
 import {dialogPeers, markedId, type DialogPeer, type NotificationDialog} from './dialogId';
 import {toTelegramError} from './errors';
@@ -142,6 +142,17 @@ export function sendVoiceNote(client: TelegramClient, entity: Entity | Api.TypeI
         ...(voice.waveform?.length ? {waveform: Buffer.from(voice.waveform)} : {}),
       }),
     ],
+    workers: 1,
+  });
+}
+
+/** Sends a photo with its caption: uploaded as a file named .jpg, which GramJS sends as a photo. */
+export function sendPhotoFile(client: TelegramClient, entity: Entity | Api.TypeInputPeer, photo: PhotoUpload): Promise<Api.Message> {
+  const buffer = Buffer.from(photo.bytes);
+  return client.sendFile(entity, {
+    file: new CustomFile('photo.jpg', buffer.length, '', buffer),
+    caption: photo.caption,
+    forceDocument: false,
     workers: 1,
   });
 }
@@ -377,6 +388,16 @@ export async function connectTelegram(config: TelegramConfig, {timeoutMs = CONNE
         const message = sentMessage(sent, chatId);
         if (!message) {
           throw new TelegramError('server', 'Telegram did not return the sent voice note');
+        }
+        return message;
+      }, MEDIA_TIMEOUT_MS),
+
+    sendPhoto: (chatId, photo) =>
+      call(async () => {
+        const sent = await sendPhotoFile(client, await entityFor(chatId), photo);
+        const message = sentMessage(sent, chatId);
+        if (!message) {
+          throw new TelegramError('server', 'Telegram did not return the sent photo');
         }
         return message;
       }, MEDIA_TIMEOUT_MS),

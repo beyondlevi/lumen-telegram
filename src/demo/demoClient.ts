@@ -139,6 +139,15 @@ export function createDemoClient(): ChatApi {
       return toModel(chat, sent);
     },
 
+    async sendPhoto(chatId, photo) {
+      await wait(SEND_DELAY_MS * 2);
+      const chat = chatFor(chatId);
+      // Kept in memory, so View shows the photo you took.
+      const url = URL.createObjectURL(new Blob([photo.bytes as BlobPart], {type: photo.mimetype}));
+      const sent = add(chat, {fromMe: true, senderName: null, content: {kind: 'photo', text: photo.caption}, media: {url, mimetype: photo.mimetype}});
+      return toModel(chat, sent);
+    },
+
     async sendText(chatId, value) {
       await wait(SEND_DELAY_MS);
       const chat = chatFor(chatId);

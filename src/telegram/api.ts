@@ -30,6 +30,9 @@ export class TelegramError extends Error {
 
 export type VoiceNote = {bytes: Uint8Array; mimetype: string; durationMs: number; waveform?: Uint8Array};
 
+/** A photo taken with the camera (a JPEG) and its caption ('' for none). */
+export type PhotoUpload = {bytes: Uint8Array; mimetype: string; caption: string};
+
 /** Media of one message: bytes (Telegram) or a URL the app can load directly (demo). */
 export type MediaPayload = {mimetype: string; bytes?: Uint8Array; url?: string};
 
@@ -49,6 +52,8 @@ export type ChatApi = {
   sendText(chatId: string, text: string, replyToId?: string): Promise<ChatMessage>;
   /** Sends a voice note (OGG/Opus) with its length and Telegram's 5-bit waveform. */
   sendVoice(chatId: string, voice: VoiceNote): Promise<ChatMessage>;
+  /** Sends a photo (shown as a photo, not as a file) with its caption. */
+  sendPhoto(chatId: string, photo: PhotoUpload): Promise<ChatMessage>;
   /** Sets (or with null clears) your reaction; returns the message's new reactions. */
   sendReaction(chatId: string, messageId: string, emoji: string | null): Promise<ChatMessage['reactions']>;
   /** Marks everything up to `maxId` as read. */
