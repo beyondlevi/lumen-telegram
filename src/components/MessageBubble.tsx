@@ -301,7 +301,8 @@ export function MessageBubble({
 
   return (
     <div
-      className={`message-row ${isOutgoing ? 'message-row--outgoing' : ''}`}>
+      className={`message-row ${isOutgoing ? 'message-row--outgoing' : ''}`}
+      data-message={message.id}>
       <div className="message-column">
         {showSender && message.senderName ? (
           <TextView

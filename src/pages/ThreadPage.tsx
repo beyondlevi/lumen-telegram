@@ -23,6 +23,7 @@ import type {ChatMessage} from '../telegram/model';
 import {displayEmoji} from '../telegram/convert';
 import {reactionOptions} from '../telegram/reactions';
 import {useAudioPlayer} from '../state/useAudioPlayer';
+import {useMessageWindow} from '../state/useListWindow';
 import {useLongMessageScroll} from '../state/useLongMessageScroll';
 import {useChat} from '../ChatProvider';
 import {recordPath} from './RecordPage';
@@ -104,6 +105,8 @@ const Thread = memo(function Thread({chatId, pathname, locationKey, composerOpen
   const {loaded, synced, messages: records} = thread(chatId);
   const isGroup = chat?.isGroup ?? false;
   const messages = records;
+  const messageIds = useMemo(() => messages.map(message => message.id), [messages]);
+  const messageWindow = useMessageWindow(chatId, messageIds);
   const allowed = allowedReactions(chatId);
   const options = useMemo(() => reactionOptions(allowed), [allowed]);
   const avatar = avatarFor(chatId);
@@ -149,24 +152,28 @@ const Thread = memo(function Thread({chatId, pathname, locationKey, composerOpen
     [composerOpen, navigate, pathname],
   );
   const startReply = useCallback(() => openComposer(null), [openComposer]);
+  const keepWindow = messageWindow.keep;
   const viewPhoto = useCallback(
     (message: ChatMessage) => {
       returnTo.bubble = true;
+      keepWindow();
       navigate(photoPath(chatId, message.id));
     },
-    [chatId, navigate],
+    [chatId, keepWindow, navigate],
   );
   const transcribe = useCallback(
     (message: ChatMessage) => {
       returnTo.bubble = true;
+      keepWindow();
       navigate(transcriptPath(chatId, message.id));
     },
-    [chatId, navigate],
+    [chatId, keepWindow, navigate],
   );
   const record = useCallback(() => {
     returnTo.voice = true;
+    keepWindow();
     navigate(recordPath(chatId));
-  }, [chatId, navigate]);
+  }, [chatId, keepWindow, navigate]);
   // Each time the conversation shows (not the reply composer), after the route
   // has restored the focus and scroll of the previous visit:
   // - back from the recording screen: focus Voice, with the sent note in view;
@@ -294,7 +301,8 @@ const Thread = memo(function Thread({chatId, pathname, locationKey, composerOpen
       <div
         className={headerHeight > 0 ? 'thread-shell thread-shell--below-header' : 'thread-shell'}
         style={headerHeight > 0 ? ({'--thread-header-height': `${headerHeight}px`} as CSSProperties) : undefined}
-        {...longMessages.handlers}>
+        {...longMessages.handlers}
+        onFocusCapture={messageWindow.onFocusCapture}>
         <VerticalList
           ref={listRef}
           insetForHeader={headerHeight === 0}
@@ -310,24 +318,27 @@ const Thread = memo(function Thread({chatId, pathname, locationKey, composerOpen
               </TextView>
             </div>
           ) : null}
-          {messages.map((message, index) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              showSender={isGroup && !message.fromMe && startsMessageRun(messages, index)}
-              endsRun={endsMessageRun(messages, index)}
-              initialFocusEligible={!composerOpen && index === messages.length - 1}
-              reactionOptions={options}
-              audio={audio.id === message.id ? audio : undefined}
-              onReact={react}
-              onReply={openComposer}
-              onView={viewPhoto}
-              onTranscribe={transcribe}
-              transcribeAvailable={lumenAudio != null}
-              transcript={message.content.kind === 'audio' ? transcriptFor(message.id) : null}
-              onToggleAudio={toggleAudio}
-            />
-          ))}
+          {messages.slice(messageWindow.first).map((message, offset) => {
+            const index = messageWindow.first + offset;
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                showSender={isGroup && !message.fromMe && startsMessageRun(messages, index)}
+                endsRun={endsMessageRun(messages, index)}
+                initialFocusEligible={!composerOpen && index === messages.length - 1}
+                reactionOptions={options}
+                audio={audio.id === message.id ? audio : undefined}
+                onReact={react}
+                onReply={openComposer}
+                onView={viewPhoto}
+                onTranscribe={transcribe}
+                transcribeAvailable={lumenAudio != null}
+                transcript={message.content.kind === 'audio' ? transcriptFor(message.id) : null}
+                onToggleAudio={toggleAudio}
+              />
+            );
+          })}
           <div className="message-end" ref={endRef} />
         </VerticalList>
         <div className="action-dock">
