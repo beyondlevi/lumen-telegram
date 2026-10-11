@@ -22,7 +22,7 @@ import {searchCandidates, type SearchTarget} from '../search/searchTargets';
 import {useVoiceInput} from '../search/useVoiceInput';
 import type {VoiceErrorCode} from '../search/voiceInput';
 import {useChat} from '../ChatProvider';
-import {chatPath} from './ChatListPage';
+import {openChatPath} from './ChatListPage';
 import {SearchResults} from './SearchResults';
 import {StatusPage} from './StatusPage';
 
@@ -141,7 +141,7 @@ function VoiceSearch() {
   const finish = useCallback(() => listeningRef.current?.finish(), []);
   const back = useCallback(() => navigate(-1), [navigate]);
   const open = useCallback(
-    (target: SearchTarget) => navigate(chatPath(target.id), {replace: true}),
+    (target: SearchTarget) => navigate(openChatPath(target.id), {replace: true}),
     [navigate],
   );
 

@@ -199,3 +199,21 @@ body {
 .search-heard {
   overflow-wrap: anywhere;
 }
+
+/* The chat list, kept mounted above the routes (see ChatList); hidden, under them. */
+.kept-page {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  contain: strict;
+  background: var(--uit-color-background-window);
+}
+
+.kept-page--hidden {
+  z-index: -1;
+}
+
+/* The routes are drawn opaque, so the list under them never shows through a page transition. */
+.route-viewport {
+  background: var(--uit-color-background-window);
+}

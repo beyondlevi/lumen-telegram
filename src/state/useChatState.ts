@@ -76,8 +76,6 @@ export type ChatState = {
   /** Transcription of a message made this session, if any. */
   transcriptFor(messageId: string): string | null;
   saveTranscript(messageId: string, text: string): void;
-  /** Chat order last shown by the list; kept across the list route's unmounts. */
-  listOrder: {current: string[] | null};
   /** Demo mode: fictional chats, no connection. */
   demo: boolean;
   /** The list's chats (recent first) and the saved contacts, for voice search; contacts load once. */
@@ -147,7 +145,6 @@ export function useChatState(): ChatState {
   const [contactNames, setContactNames] = useState<ReadonlyMap<string, string>>(new Map());
   const threadsRef = useRef<Record<string, Thread>>({});
   threadsRef.current = threads;
-  const listOrderRef = useRef<string[] | null>(null);
   const kickRef = useRef<(chatId?: string) => void>(() => {});
 
   const account = config.status === 'ready' ? accountKey(config.config) : null;
@@ -687,7 +684,6 @@ export function useChatState(): ChatState {
       sendVoice,
       transcriptFor: messageId => transcripts[messageId] ?? null,
       saveTranscript,
-      listOrder: listOrderRef,
       demo,
       searchTargets,
       contactName: chatId => contactNames.get(chatId) ?? null,

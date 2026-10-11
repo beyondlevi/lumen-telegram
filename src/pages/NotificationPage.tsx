@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef} from 'react';
 import {Navigate, useNavigate, useParams} from 'react-router-dom';
 import {findListedChat, parseShortcut} from '../telegram/dialogId';
 import {useChat} from '../ChatProvider';
-import {chatPath} from './ChatListPage';
+import {openChatPath} from './ChatListPage';
 import {StatusPage} from './StatusPage';
 
 /** Opened by Lumen from a phone notification: `{shortcut}` is Telegram's `ndid_<dialogId>`. */
@@ -38,7 +38,7 @@ export function NotificationPage() {
     startedRef.current = true;
     void resolveDialog(dialog).then(chatId => {
       if (mountedRef.current) {
-        navigate(chatId ? chatPath(chatId) : '/', {replace: true});
+        navigate(chatId ? openChatPath(chatId) : '/', {replace: true});
       }
     });
   }, [dialog, lookUp, navigate, resolveDialog]);
@@ -47,7 +47,7 @@ export function NotificationPage() {
     return <Navigate to="/" replace />;
   }
   if (listed != null) {
-    return <Navigate to={chatPath(listed.id)} replace />;
+    return <Navigate to={openChatPath(listed.id)} replace />;
   }
   return <StatusPage phase={{kind: 'connecting'}} />;
 }

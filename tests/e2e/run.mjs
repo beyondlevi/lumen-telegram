@@ -85,12 +85,24 @@ async function waitForFocus(page, pattern, timeout = 5000) {
   throw new Error(`focus never matched ${pattern}; last: ${await activeLabel(page)}`);
 }
 
+// The chat list stays in the page while a chat is open, under the routes and
+// aria-hidden; the helpers below look at what is on screen only.
 async function waitForText(page, text, timeout = 10000) {
-  await page.getByText(text, {exact: false}).first().waitFor({state: 'visible', timeout});
+  const matches = page.getByText(text, {exact: false}).filter({visible: true});
+  const started = Date.now();
+  for (;;) {
+    for (let i = await matches.count(); i > 0; i -= 1) {
+      if (await matches.nth(i - 1).evaluate(element => element.closest('.kept-page--hidden') == null).catch(() => false)) return;
+    }
+    if (Date.now() - started > timeout) throw new Error(`text never shown: ${text}`);
+    await page.waitForTimeout(100);
+  }
 }
 
 async function rowLabels(page) {
-  return page.$$eval('[role="button"][aria-label]', elements => elements.map(element => element.getAttribute('aria-label')));
+  return page.$$eval('[role="button"][aria-label]', elements =>
+    elements.filter(element => !element.closest('[aria-hidden="true"]')).map(element => element.getAttribute('aria-label')),
+  );
 }
 
 /** Whether the bubble whose label matches is on screen, between the header and the action rail. */
@@ -106,11 +118,15 @@ async function bubbleOnScreen(page, pattern) {
 }
 
 async function bubbleLabels(page) {
-  return page.$$eval('.message-stack [aria-label]', elements => elements.map(element => element.getAttribute('aria-label')));
+  return page.$$eval('.message-stack [aria-label]', elements =>
+    elements.filter(element => !element.closest('[aria-hidden="true"]')).map(element => element.getAttribute('aria-label')),
+  );
 }
 
 async function unreadRows(page) {
-  return page.$$eval('[role="img"][aria-label$="Unread Status"]', elements => elements.map(element => element.getAttribute('aria-label')));
+  return page.$$eval('[role="img"][aria-label$="Unread Status"]', elements =>
+    elements.filter(element => !element.closest('[aria-hidden="true"]')).map(element => element.getAttribute('aria-label')),
+  );
 }
 
 async function loadedImages(page) {
@@ -982,7 +998,9 @@ async function openVoiceSearch(page) {
 
 /** The result rows (titles and subtitles) of the voice search. */
 async function resultRows(page) {
-  return page.$$eval('[role="button"][aria-label]', elements => elements.map(element => element.getAttribute('aria-label')));
+  return page.$$eval('[role="button"][aria-label]', elements =>
+    elements.filter(element => !element.closest('[aria-hidden="true"]')).map(element => element.getAttribute('aria-label')),
+  );
 }
 
 /** Voice search with SpeechRecognition, window.lumen.audio, fallbacks and errors (GramJS contacts through the fake). */
@@ -1056,7 +1074,7 @@ async function voiceSearchFlow(browser, label) {
     await page.waitForTimeout(800);
     await press(page, 'Escape');
     await page.waitForURL(url => new URL(url).pathname === '/');
-    await page.getByText('Bruno Lima').first().waitFor({state: 'visible', timeout: 12000});
+    await waitForText(page, 'Bruno Lima', 12000);
 
     // No accents, several results: Família first; Back returns to the list.
     await page.waitForTimeout(800);
@@ -1180,7 +1198,9 @@ async function openNotification(page, base, shortcut) {
 
 /** Waits until the screen's only page header reads `expected` (the page transition has ended). */
 async function waitForHeader(page, expected, timeout = 5000) {
-  const headers = () => page.evaluate(() => [...document.querySelectorAll('h1, [role="heading"]')].map(element => element.textContent?.trim() ?? ''));
+  const headers = () => page.evaluate(() => [...document.querySelectorAll('h1, [role="heading"]')]
+    .filter(element => !element.closest('[aria-hidden="true"]'))
+    .map(element => element.textContent?.trim() ?? ''));
   const started = Date.now();
   let last = [];
   while (Date.now() - started < timeout) {
