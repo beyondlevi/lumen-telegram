@@ -138,13 +138,13 @@ export const Thread = memo(function Thread({chatId, pathname, locationKey, compo
   );
   const startReply = useCallback(() => openComposer(null), [openComposer]);
   const keepWindow = messageWindow.keep;
+  // A photo opens over the conversation, which stays as it is (see PhotoView).
   const viewPhoto = useCallback(
     (message: ChatMessage) => {
       returnTo.bubble = true;
-      keepWindow();
       navigate(photoPath(chatId, message.id));
     },
-    [chatId, keepWindow, navigate],
+    [chatId, navigate],
   );
   const transcribe = useCallback(
     (message: ChatMessage) => {

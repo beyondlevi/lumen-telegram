@@ -6,14 +6,13 @@ import {
 import {BrowserRouter, Navigate, Route, Routes, useLocation} from 'react-router-dom';
 import {ChatList, ChatListRoute, transitionKey} from './pages/ChatListPage';
 import {NotificationPage, NOTIFICATION_PATH} from './pages/NotificationPage';
-import {PhotoPage} from './pages/PhotoPage';
 import {RecordPage} from './pages/RecordPage';
 import {SearchPage, SEARCH_PATH} from './pages/SearchPage';
 import {ThreadPage} from './pages/ThreadPage';
 import {TranscriptPage} from './pages/TranscriptPage';
 
-// Back (Escape) is handled by ReactRouterNavigationProvider: from a photo it
-// returns to the conversation, in a thread to the list; on the list, with no history left, it is not consumed,
+// Back (Escape) is handled by ReactRouterNavigationProvider: from a photo
+// (drawn over its conversation, on the same page) it returns to the conversation, in a thread to the list; on the list, with no history left, it is not consumed,
 // so the platform closes the app. A notification opens /notification/<shortcut>,
 // which is replaced by its conversation.
 export default function TelegramApp() {
@@ -46,7 +45,7 @@ function Screens() {
             <Route path={SEARCH_PATH} element={<SearchPage />} />
             <Route path={NOTIFICATION_PATH} element={<NotificationPage />} />
             <Route path="/chat/:chatId" element={<ThreadPage />} />
-            <Route path="/chat/:chatId/photo/:messageId" element={<PhotoPage />} />
+            <Route path="/chat/:chatId/photo/:messageId" element={<ThreadPage />} />
             <Route path="/chat/:chatId/record" element={<RecordPage />} />
             <Route path="/chat/:chatId/transcript/:messageId" element={<TranscriptPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
