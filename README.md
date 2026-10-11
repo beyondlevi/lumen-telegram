@@ -32,6 +32,17 @@ through WebSocket, with no server in between.
 - **Photos**: Enter on a photo opens its menu with **View** first. View downloads the photo and shows it
   full screen on the dark window background, with a loader while it downloads and an error with
   **Try again** if it fails. Back returns to the same bubble.
+- **Sending photos**: **Photo** (the camera icon) opens the camera: on Lumen, a file input
+  (`accept="image/*"`) opens Lumen's capture screen, whose index tap takes the photo and whose middle tap
+  cancels; the page gets a JPEG of 1200 x 1600 (in a desktop browser, a file picker). The photo then shows
+  on a send screen, over the conversation: its preview, an optional caption (a real text field, so Lumen's
+  keyboard offers dictation, writing with the band and the phone) and **Send**, **Retake** and **Cancel**;
+  Back leaves without sending. Send goes back to the conversation at once, where the photo's bubble shows
+  its thumbnail and its upload: "Sending…", then "Sent" (with a toast), or "Not sent" (with a toast), whose
+  menu offers **Try again** and **Discard**. A photo larger than 1600 px on its longest side, heavier than
+  1 MB or not a JPEG is reduced before it goes (it goes over the phone's internet); Lumen's capture goes as
+  it is. It goes with GramJS `sendFile` (a `.jpg` file and the caption: `inputMediaUploadedPhoto`), so it
+  arrives as a photo, not a file. View on a photo you sent shows it without a download.
 - **Voice messages**: the bubble shows the length; Enter plays or pauses, with the position and a progress
   bar. The audio is downloaded on the first play. Telegram voice notes are OGG/Opus, which `<audio>` plays
   in GeckoView and in Chromium. One message plays at a time; playback stops when the conversation closes.
@@ -64,7 +75,7 @@ through WebSocket, with no server in between.
   bubble gets the focus and the end is revealed. Back from a photo or a transcript keeps the bubble you
   were on.
 - **Conversation actions**: a bottom rail with Reply, Voice (records a voice note when the host has
-  `window.lumen.audio`, disabled otherwise) and Photos (disabled).
+  `window.lumen.audio`, disabled otherwise) and Photo (opens the camera).
 - **Reply**: the text field (the toolkit's `InputTextView`) appears only after Reply, as its own history
   entry, so Back closes it and focus returns to Reply. On the glasses, Enter on the field opens the
   platform's dictation composer. Right then moves to Send. After sending, the field closes.
@@ -103,6 +114,11 @@ The app uses only arrow keys, Enter, and Escape (the Neural Band / Rokid gesture
 | Conversation | Enter on a voice message | Opens its menu: Listen/Pause, Transcribe, reactions, Reply |
 | Conversation | Enter on Voice | Opens the recording screen |
 | Recording | Enter on Send (initial focus) | Stops, sends, returns to the conversation on Voice |
+| Conversation | Enter on Photo | Opens the camera (Lumen's capture screen) |
+| Send photo | Enter on Send (initial focus) | Sends, returns to the conversation on Photo; the bubble follows the upload |
+| Send photo | Up, Enter | The caption field (dictation, writing, phone) |
+| Send photo | Enter on Retake / Cancel, or Escape | Another photo (the caption stays) / back without sending |
+| Conversation | Enter on a photo that was not sent | Menu: Try again, View, Discard |
 | Recording | Right, Enter (Discard) or Escape | Cancels without sending |
 | Transcript | Escape | Back to the voice message (the transcript stays under it) |
 | Message menu | Left / Right, Enter | View (photos), a reaction, or Reply (quoted reply) |
@@ -208,7 +224,8 @@ Checked against the Telegram documentation and measured in headless Chromium and
   `messages.sendReaction`, `messages.readHistory` / `channels.readHistory`, `messages.getFullChat` /
   `channels.getFullChannel` (`available_reactions`), `messages.getAvailableReactions`,
   `upload.getFile` (photos, voice notes, profile photos), `upload.saveFilePart` + `messages.sendMedia`
-  (voice notes: `inputMediaUploadedDocument`, `audio/ogg`, `documentAttributeAudio` voice/duration/
+  (photos: `inputMediaUploadedPhoto` with the caption as `message`; voice notes:
+  `inputMediaUploadedDocument`, `audio/ogg`, `documentAttributeAudio` voice/duration/
   waveform; see [documentAttributeAudio](https://core.telegram.org/constructor/documentAttributeAudio) and
   [files](https://core.telegram.org/api/files)), and the update stream. Transcription uses the Lumen host;
   `messages.transcribeAudio` (Telegram Premium) is not used.
@@ -443,7 +460,12 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
     Back aborting the recognizer, a recognizer refused as unavailable (the row then hidden, or
     `window.lumen.audio` taking over), and pt-PT; and opening from a notification (`/notification/ndid_…` for
     a user and a basic group in the list, a supergroup that is not, garbage and an unknown id, Back to the
-    list); and Back to a long list (66 chats): the list stays mounted, hidden under the routes (`inert`,
+    list); photos (`setInputFiles` through the file chooser, with `tests/fixtures/camera.jpg`, a JPEG of
+    1200 x 1600 as Lumen's capture hands over: the send screen, a dictated caption, Send back to the
+    conversation at once with "Sending…" and then "Sent", the photo checked on the scripted Telegram
+    (`log.photos`: to Ana, the caption, the same bytes, 1200 x 1600), a refused upload (`setPhotoUpload`):
+    "Not sent" and Try again, Cancel and Back sending nothing, and Retake keeping the caption, with a
+    2400 x 3200 photo reduced to 1200 x 1600); and Back to a long list (66 chats): the list stays mounted, hidden under the routes (`inert`,
     `aria-hidden`) and out of the D-pad's reach while the chat is open, and comes back with the same row elements
     and the focus on the chat; the list renders its first rows only and more as the focus goes down; the
     conversation renders its newest messages and more as the focus goes up. Native recognizers are removed
@@ -483,6 +505,10 @@ thread's long tasks after it; and the launch until the list is drawn. Measured o
 
 With the CPU throttled 4x: Back 2787 → 76 ms, opening 2055 → 1147 ms. With 40 extra chats (6x): Back
 2228 → 75 ms.
+
+Sending photos (measured on 2026-10-11, same settings): Back from the send screen to the conversation takes
+86 ms (median of 5, 80-95), with the focus back on Photo, and Back to the list stays at 77 ms (77 ms
+before).
 
 Voice notes and transcription (`tests/e2e/fakeAudio.mjs` injects a scripted `window.lumen.audio`, in
 Chromium and Firefox):

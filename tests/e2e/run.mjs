@@ -23,6 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {unzipSync} from 'fflate';
 import {chromium, firefox} from 'playwright';
+import sharp from 'sharp';
 import {fakeAudioScript} from './fakeAudio.mjs';
 import {fakeSpeechScript, NO_NATIVE_SPEECH} from './fakeSpeech.mjs';
 import {LONG_THREAD, longMessageScenario} from './longMessages.mjs';
@@ -30,6 +31,8 @@ import {startStaticServer} from './static-server.mjs';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
 const outDir = path.join(root, '.e2e-output');
+/** A photo as Lumen's capture screen hands it over (JPEG, 1200 x 1600). */
+const PHOTO = path.join(root, 'tests/fixtures/camera.jpg');
 const APP = 'http://127.0.0.1:4173';
 const FAKE_APP = 'http://127.0.0.1:4174';
 const PACKAGE_APP = 'http://127.0.0.1:5500';
@@ -642,7 +645,7 @@ async function mainFlow(browser, label) {
     assert.ok(await page.getByText('Transcribe', {exact: true}).count() >= 1, 'Transcribe in the audio file menu');
     await press(page, 'Escape');
     await page.waitForTimeout(400);
-    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photos)$/);
+    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photo)$/);
     await pressUntil(page, 'ArrowLeft', /^div\|Reply$/);
     await press(page, 'Enter');
     await dictate(page, 'Recebi, obrigado');
@@ -799,7 +802,7 @@ async function voiceFlow(browser) {
     assert.equal(await bubbleOnScreen(page, /You: Voice message/), 'visible', 'the voice note is in view when the chat reopens');
     assert.match(await activeLabel(page), /^div\|Actions for message: You: Voice message/, 'reopening focuses the newest message');
     await page.screenshot({path: path.join(outDir, 'voice-8-reopened.png')});
-    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photos)$/);
+    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photo)$/);
     if (await activeLabel(page) !== 'div|Voice') await pressUntil(page, 'ArrowLeft', /^div\|Voice$/);
 
     // Discard, then Back: nothing sent, recordings cancelled
@@ -1026,7 +1029,7 @@ async function keptListFlow(browser) {
     await press(page, 'Enter');
     await waitForText(page, 'Reply');
     assert.deepEqual(
-      await page.$eval('.kept-page', list => [list.inert, list.getAttribute('aria-hidden'), getComputedStyle(list).zIndex]),
+      await page.$eval('.kept-page.chat-list', list => [list.inert, list.getAttribute('aria-hidden'), getComputedStyle(list).zIndex]),
       [true, 'true', '-1'],
       'hidden list: inert, aria-hidden, under the routes',
     );
@@ -1036,7 +1039,7 @@ async function keptListFlow(browser) {
     assert.ok(messagesAtOpen <= 12, `messages rendered at open: ${messagesAtOpen}`);
     for (let i = 0; i < 14; i += 1) {
       await press(page, 'ArrowUp');
-      assert.equal(await page.evaluate(() => document.activeElement?.closest('.kept-page') == null), true, 'focus stays out of the hidden list');
+      assert.equal(await page.evaluate(() => document.activeElement?.closest('.kept-page.chat-list') == null), true, 'focus stays out of the hidden list');
     }
     const messagesAfterUp = await page.$$eval('.thread-shell .message-row', rows => rows.length);
     assert.ok(messagesAfterUp > messagesAtOpen, `older messages rendered: ${messagesAtOpen} -> ${messagesAfterUp}`);
@@ -1046,12 +1049,132 @@ async function keptListFlow(browser) {
     assert.equal(new URL(page.url()).pathname, '/');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.keptMark), 'yes', 'the same row, not a rebuilt list');
     assert.equal(await chatRows(), rowsAtOpen, 'no rows added or rebuilt by Back');
-    assert.equal(await page.$eval('.kept-page', list => list.inert || list.getAttribute('aria-hidden') === 'true'), false);
+    assert.equal(await page.$eval('.kept-page.chat-list', list => list.inert || list.getAttribute('aria-hidden') === 'true'), false);
 
     for (let i = 0; i < 20; i += 1) await press(page, 'ArrowDown', 1);
     assert.match(await activeLabel(page), /^div\|Contact 2[0-9],/);
     assert.ok((await chatRows()) > rowsAtOpen, 'more rows as the focus goes down');
     assert.equal(await escapeReachesHost(page), true, 'Escape on the list still closes the app');
+    assert.deepEqual(problems, []);
+  } finally {
+    await context.close();
+  }
+}
+
+/** A photo from Lumen's capture (the file input), its send screen, and its bubble while it uploads. */
+async function photoFlow(browser, label) {
+  const {context, page, problems} = await newPage(browser, {values: ACCOUNT});
+  const photos = () => fake(page, () => window.__fakeTelegram.log.photos);
+  const upload = (failures, delayMs) => fake(page, value => window.__fakeTelegram.setPhotoUpload(value), {failures, delayMs});
+  const bubbles = async () => (await bubbleLabels(page)).filter(text => text.startsWith('Actions for message: You: Photo'));
+  // Lumen's capture screen hands over a JPEG of 1200 x 1600; a larger one (a desktop picker) is reduced.
+  const large = path.join(os.tmpdir(), 'lumen-telegram-e2e-large.jpg');
+  await sharp(PHOTO).resize(2400, 3200).jpeg({quality: 95}).toFile(large);
+  let next = PHOTO;
+  page.on('filechooser', chooser => chooser.setFiles(next));
+  const shot = name => page.screenshot({path: path.join(outDir, `${label}-${name}.png`)});
+  const takePhoto = async () => {
+    await pressUntil(page, 'ArrowRight', /^div\|Photo$/, 4);
+    await press(page, 'Enter');
+    await page.waitForSelector('.photo-send-layer', {timeout: 5000});
+    await waitForFocus(page, /^div\|Send$/);
+  };
+  try {
+    await page.goto(`${FAKE_APP}/`);
+    await waitForText(page, 'Ana Souza');
+    await press(page, 'Enter');
+    await waitForText(page, 'Levo o projetor');
+    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photo)$/);
+
+    // Photo, then the send screen: preview, caption, Send / Retake / Cancel.
+    // The upload takes a while, as over the phone's internet.
+    await upload(0, 2000);
+    await takePhoto();
+    assert.equal(await page.$eval('.photo-send-preview', image => image.complete && image.naturalWidth), 1200);
+    assert.equal(await page.$eval('.kept-page:not(.chat-list)', page => page.inert), true, 'the conversation under it is inert');
+    await shot('photo-1-send-screen');
+    await press(page, 'ArrowUp');
+    assert.match(await activeLabel(page), /^textarea\|Caption for the photo$/);
+    await dictate(page, 'Pôr do sol no parque');
+    await shot('photo-2-caption');
+    await press(page, 'ArrowDown');
+    await pressUntil(page, 'ArrowLeft', /^div\|Send$/, 3);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(120);
+    // At once: back in the conversation, the bubble there, sending.
+    assert.equal(await page.$('.photo-send-layer'), null);
+    assert.equal(await page.evaluate(() => history.state?.usr?.photoSend ?? false), false);
+    await page.waitForFunction(() => document.querySelectorAll('.sent-photo').length === 1);
+    assert.match((await bubbles()).at(-1), /^Actions for message: You: Photo: Pôr do sol no parque, .*, Sending…$/);
+    await page.waitForFunction(() => document.querySelector('.sent-photo-thumbnail')?.naturalWidth > 0);
+    await shot('photo-3-sending');
+    await waitForFocus(page, /^div\|Photo$/);
+    for (let i = 0; i < 40 && !(await bubbles()).some(text => text.endsWith(', Sent')); i += 1) await page.waitForTimeout(100);
+    assert.match((await bubbles()).at(-1), /^Actions for message: You: Photo: Pôr do sol no parque, .*, Sent$/);
+    let sent = await photos();
+    assert.equal(sent.length, 1);
+    assert.deepEqual(
+      {chatId: sent[0].chatId, mimetype: sent[0].mimetype, caption: sent[0].caption, head: sent[0].head, width: sent[0].width, height: sent[0].height, bytes: sent[0].bytes},
+      {chatId: ANA, mimetype: 'image/jpeg', caption: 'Pôr do sol no parque', head: 'ffd8ff', width: 1200, height: 1600, bytes: fs.statSync(PHOTO).size},
+      'the capture goes as it is, with its caption, to Ana',
+    );
+    await waitForText(page, 'Photo sent', 4000);
+    await shot('photo-4-sent');
+
+    // Upload refused: "Not sent", Try again from the bubble's menu.
+    await upload(1, 0);
+    await takePhoto();
+    await press(page, 'Enter');
+    await waitForText(page, 'Photo not sent: Telegram error', 6000);
+    for (let i = 0; i < 40 && !(await bubbles()).some(text => text.endsWith(', Not sent')); i += 1) await page.waitForTimeout(100);
+    assert.match((await bubbles()).at(-1), /^Actions for message: You: Photo, .*, Not sent$/);
+    await page.waitForTimeout(600);
+    await shot('photo-5-failed');
+    await press(page, 'ArrowUp');
+    assert.match(await activeLabel(page), /You: Photo, .*, Not sent$/);
+    await press(page, 'Enter');
+    await waitForFocus(page, /Try again/);
+    await shot('photo-6-failed-menu');
+    await press(page, 'Enter');
+    for (let i = 0; i < 40 && (await photos()).length < 2; i += 1) await page.waitForTimeout(100);
+    for (let i = 0; i < 40 && !(await bubbles()).at(-1)?.endsWith(', Sent'); i += 1) await page.waitForTimeout(100);
+    assert.match((await bubbles()).at(-1), /, Sent$/);
+    sent = await photos();
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].caption, '', 'no caption');
+
+    // Cancel, and Back (the middle tap), send nothing and come back to Photo.
+    await pressUntil(page, 'ArrowDown', /^div\|(Reply|Voice|Photo)$/);
+    await takePhoto();
+    await pressUntil(page, 'ArrowRight', /^div\|Cancel$/, 3);
+    await press(page, 'Enter');
+    await waitForFocus(page, /^div\|Photo$/);
+    await takePhoto();
+    await page.keyboard.press('Escape');
+    await waitForFocus(page, /^div\|Photo$/);
+    assert.equal(await page.$('.photo-send-layer'), null);
+    assert.equal((await photos()).length, 2, 'Cancel and Back send nothing');
+
+    // Retake: another photo replaces the preview (the caption stays); a larger
+    // one is reduced to 1600 px before it goes. A new opening starts with no caption.
+    await takePhoto();
+    assert.equal(await page.$eval('.photo-send-layer:not(.photo-send-layer--closed) textarea', field => field.value), '');
+    await press(page, 'ArrowUp');
+    await dictate(page, 'Segunda');
+    await press(page, 'ArrowDown');
+    next = large;
+    await pressUntil(page, 'ArrowLeft', /^div\|Send$/, 3);
+    await pressUntil(page, 'ArrowRight', /^div\|Retake$/, 3);
+    await press(page, 'Enter');
+    await page.waitForFunction(() => document.querySelector('.photo-send-preview')?.naturalWidth === 2400);
+    next = PHOTO;
+    await pressUntil(page, 'ArrowLeft', /^div\|Send$/, 3);
+    await press(page, 'Enter');
+    for (let i = 0; i < 60 && (await photos()).length < 3; i += 1) await page.waitForTimeout(100);
+    sent = await photos();
+    assert.equal(sent.length, 3);
+    assert.deepEqual([sent[2].width, sent[2].height, sent[2].head], [1200, 1600, 'ffd8ff'], 'reduced to fit 1600 px');
+    assert.equal(sent[2].caption, 'Segunda', 'the caption stays through Retake');
     assert.deepEqual(problems, []);
   } finally {
     await context.close();
@@ -1378,6 +1501,7 @@ async function run() {
           await demoFlow(browser, name, APP, {audioOutput: name !== 'firefox'});
         });
         await test(`[${name}] Back to a long list: kept mounted, focus on the chat; rows and messages in windows`, () => keptListFlow(browser));
+        await test(`[${name}] photos: take, caption, send, sending/sent/not sent, Try again, Cancel, Back, Retake`, () => photoFlow(browser, name));
         await test(`[${name}] voice search: entry point, SpeechRecognition and window.lumen.audio, fuzzy names, contacts, no match, fallback`, () => voiceSearchFlow(browser, name));
         await test(`[${name}] long messages (first, middle, last): Down/Up scroll through each before moving on`, () => longMessagesFlow(browser, name));
         await test(`[${name}] opening from a notification: user, basic group, cached, supergroup outside the list, unknown and garbage ids, demo, Back to the list`, () => notificationFlow(browser, name));

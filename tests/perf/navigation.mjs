@@ -6,6 +6,10 @@
 //   PERF_CPU=4 PERF_CHATS=160 PERF_RUNS=5 node tests/perf/navigation.mjs
 //   PERF_OUT=out.json (writes every sample), PERF_SHOTS=<dir> (screenshots after Back)
 //
+// Then, in a conversation, it takes a photo (the file chooser gets
+// tests/fixtures/camera.jpg) and times Back from its send screen
+// (`photoBack*`).
+//
 // For each key it records, from the key's event time to the end of a frame
 // (its style, layout and paint included): `ready`, the first frame with the
 // target screen in the page (the work the key started is done); `first`, the
@@ -22,6 +26,8 @@ import {NO_NATIVE_SPEECH} from '../e2e/fakeSpeech.mjs';
 import {startStaticServer} from '../e2e/static-server.mjs';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+/** A photo as Lumen's capture screen hands it over (JPEG, 1200 x 1600). */
+const PHOTO = path.join(root, 'tests/fixtures/camera.jpg');
 const APP = 'http://127.0.0.1:4174';
 const CPU = Number(process.env.PERF_CPU ?? 6);
 const CHATS = Number(process.env.PERF_CHATS ?? 160);
@@ -160,7 +166,7 @@ async function main() {
   if (!fs.existsSync(path.join(dist, 'index.html'))) throw new Error('Build first: npm run build:e2e');
   const server = await startStaticServer(dist, 4174);
   const browser = await chromium.launch();
-  const results = {cpu: CPU, chats: CHATS, launches: [], launchBusy: [], opens: [], backs: []};
+  const results = {cpu: CPU, chats: CHATS, launches: [], launchBusy: [], opens: [], backs: [], photoBacks: []};
   try {
     for (let launch = 0; launch < LAUNCHES; launch += 1) {
       const context = await browser.newContext({viewport: {width: 600, height: 600}, locale: 'en-US'});
@@ -203,6 +209,25 @@ async function main() {
           fs.mkdirSync(process.env.PERF_SHOTS, {recursive: true});
           await page.screenshot({path: path.join(process.env.PERF_SHOTS, 'list-after-back.png')});
         }
+
+        // A photo taken from the conversation, then Back from its send screen to the conversation.
+        page.on('filechooser', chooser => chooser.setFiles(PHOTO));
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(2500);
+        for (let run = 0; run < RUNS; run += 1) {
+          await page.evaluate(() => [...document.querySelectorAll('.thread-shell .action-dock [data-uit-interactable]')]
+            .find(button => button.textContent?.trim() === 'Photo')?.focus());
+          await page.keyboard.press('Enter');
+          await page.waitForSelector('.photo-send-layer');
+          await page.waitForTimeout(1500);
+          const back = await timeKey(page, 'Escape', '.thread-shell', '.photo-send-layer');
+          back.focusOk = back.focus === 'Photo' || /^Photo$/.test(await page.evaluate(() => document.activeElement?.textContent?.trim() ?? ''));
+          results.photoBacks.push(back);
+          await page.waitForTimeout(1500);
+        }
+        if (process.env.PERF_SHOTS) {
+          await page.screenshot({path: path.join(process.env.PERF_SHOTS, 'conversation-after-photo-back.png')});
+        }
       }
       await context.close();
     }
@@ -227,6 +252,10 @@ async function main() {
     backFullMs: median(results.backs.map(sample => sample.full)),
     backBusyMs: median(results.backs.map(sample => sample.busy)),
     backFocusOk: results.backs.every(sample => sample.focusOk),
+    photoBackFirstMs: median(results.photoBacks.map(sample => sample.first)),
+    photoBackFullMs: median(results.photoBacks.map(sample => sample.full)),
+    photoBackBusyMs: median(results.photoBacks.map(sample => sample.busy)),
+    photoBackFocusOk: results.photoBacks.every(sample => sample.focusOk),
   };
   if (process.env.PERF_OUT) fs.writeFileSync(process.env.PERF_OUT, JSON.stringify({summary, ...results}, null, 2));
   console.log(JSON.stringify(summary, null, 2));
