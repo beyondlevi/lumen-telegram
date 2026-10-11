@@ -217,3 +217,66 @@ body {
 .route-viewport {
   background: var(--uit-color-background-window);
 }
+
+/* The photo just taken, drawn over its conversation (see PhotoSend). */
+.photo-send-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--uit-color-background-window);
+}
+
+.photo-send-layer--closed {
+  z-index: -2;
+}
+
+.photo-send {
+  align-items: center;
+}
+
+.photo-send-preview {
+  display: block;
+  max-block-size: 40vb;
+  max-inline-size: 100%;
+  border-radius: var(--uit-corner-radius-medium);
+}
+
+.photo-send > :last-child {
+  align-self: stretch;
+}
+
+.photo-input {
+  display: none;
+}
+
+.focus-park {
+  position: absolute;
+  inline-size: 0;
+  block-size: 0;
+  overflow: hidden;
+}
+
+/* A photo you sent: its thumbnail, caption and upload state. */
+.sent-photo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--uit-spacing-2xs);
+}
+
+.sent-photo-thumbnail {
+  display: block;
+  inline-size: 27vi;
+  max-inline-size: 100%;
+  object-fit: cover;
+  border-radius: var(--uit-corner-radius-small);
+}
+
+.sent-photo-thumbnail--loading {
+  background: var(--uit-color-background-message-outbound);
+}
+
+.sent-photo-state {
+  display: flex;
+  align-items: center;
+  gap: var(--uit-spacing-2xs);
+}

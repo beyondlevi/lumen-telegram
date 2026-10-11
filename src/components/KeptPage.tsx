@@ -6,16 +6,20 @@ import {useEffect, useRef, useState, type ReactNode, type Ref} from 'react';
  * reader; it keeps its rows, scroll and drawing, so showing it again only
  * brings it back on top. Shown again, it stays inert for one more frame:
  * lifting inert restyles every element in it, which would delay the frame
- * that shows it. `onLive` runs once it can take the focus again.
+ * that shows it. `onLive` runs once it can take the focus again. It keeps
+ * the chat list above the routes, and a conversation under the photo just
+ * taken.
  */
 export function KeptPage({
   shown,
   onLive,
+  className = '',
   children,
   ref,
 }: {
   shown: boolean;
   onLive?: () => void;
+  className?: string;
   children: ReactNode;
   ref?: Ref<HTMLDivElement>;
 }) {
@@ -44,7 +48,7 @@ export function KeptPage({
   return (
     <div
       ref={ref}
-      className={shown ? 'kept-page' : 'kept-page kept-page--hidden'}
+      className={`kept-page ${shown ? '' : 'kept-page--hidden'} ${className}`}
       inert={!(shown && live)}
       aria-hidden={!shown}>
       {children}

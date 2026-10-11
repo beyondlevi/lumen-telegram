@@ -223,7 +223,7 @@ export function ChatList() {
     return null;
   }
   return (
-    <KeptPage ref={layerRef} shown={shown} onLive={focusRow}>
+    <KeptPage ref={layerRef} className="chat-list" shown={shown} onLive={focusRow}>
       {view.current}
     </KeptPage>
   );

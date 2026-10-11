@@ -17,6 +17,8 @@ import {encodeWaveform} from '../telegram/waveform';
 import {createAvatarLoader} from './avatars';
 import {loadChatCache, saveChatCache} from './chatCache';
 import {createMediaLoader, type LoadedMedia} from './media';
+import {photoThumbnail, photoToSend, type CapturedPhoto} from '../photo/capturedPhoto';
+import {failureReason} from '../failure';
 import {loadReadMarks, saveReadMarks, type ReadMarks} from './readMarks';
 import {useLumenConfig} from './useLumenConfig';
 
@@ -73,6 +75,14 @@ export type ChatState = {
   audio: LumenAudio | null;
   /** Sends a recorded voice note; `levels` (0..1 during the recording) become its waveform. */
   sendVoice(chatId: string, recording: LumenAudioResult, levels?: readonly number[]): Promise<void>;
+  /** Sends a photo taken with the camera; its bubble shows at once and follows the upload. */
+  sendPhoto(chatId: string, photo: CapturedPhoto, caption: string): void;
+  /** A photo sent this session: its thumbnail and where its upload is. */
+  sentPhoto(messageId: string): SentPhoto | null;
+  /** Sends a photo that failed again. */
+  retryPhoto(messageId: string): void;
+  /** Drops a photo that failed. */
+  discardPhoto(messageId: string): void;
   /** Transcription of a message made this session, if any. */
   transcriptFor(messageId: string): string | null;
   saveTranscript(messageId: string, text: string): void;
@@ -90,6 +100,10 @@ export type ChatState = {
 };
 
 const EMPTY_THREAD: Thread = {loaded: false, synced: false, messages: []};
+
+/** A photo sent this session. `key` stays the same when Telegram gives the message its id. */
+export type SentPhoto = {key: string; thumbnail: string | null; state: 'sending' | 'sent' | 'failed'; width: number; height: number};
+type Upload = {chatId: string; photo: CapturedPhoto; caption: string};
 
 function toError(error: unknown): TelegramError {
   return error instanceof TelegramError
@@ -556,6 +570,131 @@ export function useChatState(): ChatState {
     [api, media],
   );
 
+  // Photos: the bubble is added at once (a local id) and follows the upload;
+  // Telegram's id replaces the local one when the upload is done.
+  const [sentPhotos, setSentPhotos] = useState<Record<string, SentPhoto>>({});
+  const uploadsRef = useRef(new Map<string, Upload>());
+  const photoCounterRef = useRef(0);
+
+  const uploadPhoto = useCallback(
+    async (localId: string) => {
+      const upload = uploadsRef.current.get(localId);
+      if (upload == null) {
+        return;
+      }
+      // The bubble says "Sending…" at once; a toast tells how it ended.
+      setSentPhotos(previous => (previous[localId] ? {...previous, [localId]: {...previous[localId], state: 'sending'}} : previous));
+      try {
+        if (api == null) {
+          throw new TelegramError('network', 'Not connected');
+        }
+        const blob = await photoToSend(upload.photo);
+        const sent = await api.sendPhoto(upload.chatId, {
+          bytes: new Uint8Array(await blob.arrayBuffer()),
+          mimetype: 'image/jpeg',
+          caption: upload.caption,
+        });
+        uploadsRef.current.delete(localId);
+        media?.prime({chatId: upload.chatId, id: sent.id}, upload.photo.blob, upload.photo.blob.type || 'image/jpeg');
+        setSentPhotos(previous => {
+          const entry = previous[localId];
+          if (entry == null) {
+            return previous;
+          }
+          const {[localId]: _local, ...rest} = previous;
+          return {...rest, [sent.id]: {...entry, state: 'sent'}};
+        });
+        setThreads(previous => {
+          const current = previous[upload.chatId];
+          if (current == null) {
+            return previous;
+          }
+          return {
+            ...previous,
+            [upload.chatId]: {
+              ...current,
+              // A push update may have brought Telegram's copy already: then the local one goes.
+              messages: current.messages.some(message => message.id === sent.id)
+                ? current.messages.filter(message => message.id !== localId)
+                : current.messages.map(message =>
+                    message.id === localId ? {...sent, chatId: upload.chatId, fromMe: true, pending: true} : message,
+                  ),
+            },
+          };
+        });
+        Toast.show(t('photoSent'));
+      } catch (error) {
+        setSentPhotos(previous => (previous[localId] ? {...previous, [localId]: {...previous[localId], state: 'failed'}} : previous));
+        Toast.show(t('photoFailed', {reason: failureReason(error)}));
+      }
+    },
+    [api, media],
+  );
+
+  const sendPhoto = useCallback(
+    (chatId: string, photo: CapturedPhoto, caption: string) => {
+      photoCounterRef.current += 1;
+      const localId = `local-photo-${Date.now()}-${photoCounterRef.current}`;
+      const message: ChatMessage = {
+        id: localId,
+        chatId,
+        fromMe: true,
+        senderName: null,
+        timestamp: Date.now(),
+        content: {kind: 'photo', text: caption},
+        pending: true,
+      };
+      uploadsRef.current.set(localId, {chatId, photo, caption});
+      media?.prime(message, photo.blob, photo.blob.type || 'image/jpeg');
+      setSentPhotos(previous => ({...previous, [localId]: {key: localId, thumbnail: null, state: 'sending', width: photo.width, height: photo.height}}));
+      setThreads(previous => {
+        const current = previous[chatId] ?? {loaded: true, synced: true, messages: []};
+        return {...previous, [chatId]: {...current, messages: mergeThread(current.messages, [message])}};
+      });
+      setChats(previous => {
+        const existing = previous.find(chat => chat.id === chatId);
+        if (!existing) {
+          return previous;
+        }
+        const updated = {...existing, lastMessage: message, timestamp: message.timestamp};
+        return [updated, ...previous.filter(chat => chat.id !== chatId)];
+      });
+      // The thumbnail comes a moment later; the bubble shows a placeholder until then.
+      photoThumbnail(photo).then(
+        thumbnail =>
+          setSentPhotos(previous => {
+            const id = Object.keys(previous).find(key => previous[key].key === localId);
+            return id == null ? previous : {...previous, [id]: {...previous[id], thumbnail}};
+          }),
+        () => undefined,
+      );
+      void uploadPhoto(localId);
+    },
+    [media, uploadPhoto],
+  );
+
+  const retryPhoto = useCallback((messageId: string) => void uploadPhoto(messageId), [uploadPhoto]);
+
+  const discardPhoto = useCallback((messageId: string) => {
+    const upload = uploadsRef.current.get(messageId);
+    uploadsRef.current.delete(messageId);
+    setSentPhotos(previous => {
+      const {[messageId]: entry, ...rest} = previous;
+      if (entry?.thumbnail) {
+        URL.revokeObjectURL(entry.thumbnail);
+      }
+      return rest;
+    });
+    if (upload != null) {
+      setThreads(previous => {
+        const current = previous[upload.chatId];
+        return current == null
+          ? previous
+          : {...previous, [upload.chatId]: {...current, messages: current.messages.filter(message => message.id !== messageId)}};
+      });
+    }
+  }, []);
+
   const saveTranscript = useCallback(
     (messageId: string, text: string) => setTranscripts(previous => ({...previous, [messageId]: text})),
     [],
@@ -682,6 +821,10 @@ export function useChatState(): ChatState {
       loadMedia,
       audio,
       sendVoice,
+      sendPhoto,
+      sentPhoto: messageId => sentPhotos[messageId] ?? null,
+      retryPhoto,
+      discardPhoto,
       transcriptFor: messageId => transcripts[messageId] ?? null,
       saveTranscript,
       demo,
@@ -690,6 +833,6 @@ export function useChatState(): ChatState {
       resolveDialog,
     }),
     // avatarVersion: a photo finished loading.
-    [allowed, audio, avatarVersion, avatars, chats, contactNames, demo, isUnread, loadMedia, offline, openThread, phase, reloadConfig, resolveDialog, resolvedChats, saveTranscript, searchTargets, sendReaction, sendText, sendVoice, syncing, threads, transcripts],
+    [allowed, audio, avatarVersion, avatars, chats, contactNames, demo, discardPhoto, isUnread, loadMedia, offline, openThread, phase, reloadConfig, resolveDialog, resolvedChats, retryPhoto, saveTranscript, searchTargets, sendPhoto, sendReaction, sendText, sendVoice, sentPhotos, syncing, threads, transcripts],
   );
 }
