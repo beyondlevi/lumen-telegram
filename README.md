@@ -443,12 +443,46 @@ npm run test:live                                 # needs internet; LIVE_PROXY=1
     Back aborting the recognizer, a recognizer refused as unavailable (the row then hidden, or
     `window.lumen.audio` taking over), and pt-PT; and opening from a notification (`/notification/ndid_…` for
     a user and a basic group in the list, a supergroup that is not, garbage and an unknown id, Back to the
-    list). Native recognizers are removed from every test page.
+    list); and Back to a long list (66 chats): the list stays mounted, hidden under the routes (`inert`,
+    `aria-hidden`) and out of the D-pad's reach while the chat is open, and comes back with the same row elements
+    and the focus on the chat; the list renders its first rows only and more as the focus goes down; the
+    conversation renders its newest messages and more as the focus goes up. Native recognizers are removed
+    from every test page.
 - **Live** (`tests/live/transport.mjs`): the release build against Telegram's servers, with a random
   session and no account.
 
 CI (`.github/workflows/ci.yml`) runs the unit tests, the package, the E2E build and the E2E suite, and
 uploads the `.mrbd.zip` and the screenshots. A separate job runs the live check without failing the build.
+
+### Navigation speed
+
+The chat list is not rebuilt on Back: it is mounted once, next to the routes, and while a chat (or its
+photo, recorder, transcript, the search or a notification) is open it only goes under them (inert and
+`aria-hidden`), keeping its rows, scroll and drawing. Back brings it back on top in the next frame, then
+gives the focus to the chat the wearer came from. Long lists render in windows: the first 16 rows, then 8
+more whenever the focus gets within 8 rows of the last one (in idle time). A conversation renders its newest
+12 messages, then 8 older ones whenever the focus gets within 4 of the oldest rendered. Rows and the leaving
+conversation are not drawn again when nothing they show changed. Each opening of a chat is a page of its own
+for the page transition, so it starts at its newest message.
+
+```sh
+npm run build:e2e && npm run perf                 # Chromium, CPU throttled 6x, 600x600, 160 extra scripted chats
+PERF_CPU=4 PERF_CHATS=40 npm run perf             # other settings; PERF_OUT=<file.json> keeps every sample
+```
+
+`tests/perf/navigation.mjs` opens a chat (Enter) and goes back (Escape) five times and times each key, from
+the key's event to the end of the first frame where the target screen is fully drawn on top, with the main
+thread's long tasks after it; and the launch until the list is drawn. Measured on 2026-10-11 (median of 5, 160 extra chats, CPU 6x):
+
+| | before (0.3.1) | after |
+| --- | --- | --- |
+| Back from a chat to the list | 4000 ms | 74 ms (70-97) |
+| Opening a chat (page transition included) | 3224 ms | 1170 ms |
+| Launch, list drawn | 4798 ms | 1867 ms |
+| Launch, long tasks in the first 8 s | 4321 ms | 1472 ms |
+
+With the CPU throttled 4x: Back 2787 → 76 ms, opening 2055 → 1147 ms. With 40 extra chats (6x): Back
+2228 → 75 ms.
 
 Voice notes and transcription (`tests/e2e/fakeAudio.mjs` injects a scripted `window.lumen.audio`, in
 Chromium and Firefox):
