@@ -17,12 +17,7 @@ import {
   CornerRadius,
   DismissReason,
   EmojiContextMenuItemView,
-  IconImage,
-  IndeterminateLoader,
-  IndeterminateLoaderSize,
   MaterialLibrary,
-  ProgressIndicator,
-  ProgressIndicatorSize,
   TailShapeProvider,
   TextColor,
   TextStyle,
@@ -32,12 +27,13 @@ import {
   type ButtonHandle,
 } from '@wearables-ui-toolkit/mrbd';
 import {useLayoutEffect, useMemo, useRef, useState, type MouseEvent} from 'react';
-import {describeContent, formatBubbleTime, formatDuration, isMarker, isVoiceNote, snippet} from '../format';
+import {describeContent, formatBubbleTime, isMarker} from '../format';
 import {t} from '../i18n/strings';
 import type {AudioState} from '../state/useAudioPlayer';
 import {displayEmoji} from '../telegram/convert';
 import type {ChatMessage, ReactionSummary} from '../telegram/model';
 import type {ReactionOption} from '../telegram/reactions';
+import {AudioContent, audioDescription} from './AudioContent';
 
 type MessageBubbleProps = {
   message: ChatMessage;
@@ -102,63 +98,6 @@ function reactionsText(reactions: ReactionSummary[]): string {
 
 function reactionCount(reactions: ReactionSummary[] | undefined): number {
   return (reactions ?? []).reduce((total, reaction) => total + reaction.count, 0);
-}
-
-function audioDescription(message: ChatMessage, audio: AudioState | undefined): string {
-  const duration = formatDuration(audio?.duration || message.content.seconds || 0);
-  const position = formatDuration(audio?.position ?? 0);
-  switch (audio?.status) {
-    case 'playing':
-      return t('audioPlaying', {position, duration});
-    case 'paused':
-      return t('audioPaused', {position, duration});
-    case 'loading':
-      return t('audioLoading');
-    default:
-      return t(isVoiceNote(message.content) ? 'audioLabel' : 'audioFileLabel', {duration});
-  }
-}
-
-const TRANSCRIPT_PREVIEW_LENGTH = 90;
-
-function AudioContent({message, audio, transcript}: {message: ChatMessage; audio?: AudioState; transcript?: string | null}) {
-  const status = audio?.status ?? 'idle';
-  const duration = audio?.duration || message.content.seconds || 0;
-  const position = audio?.position ?? 0;
-  const started = status === 'playing' || status === 'paused';
-  return (
-    <div className="audio-block">
-      <div className="audio-content">
-        {status === 'loading' ? (
-          <IndeterminateLoader size={IndeterminateLoaderSize.SMALL} />
-        ) : (
-          <IconImage className="audio-icon" source={status === 'playing' ? mediaPauseFilled : circlePlayFilled} />
-        )}
-        <div className="audio-track">
-          <ProgressIndicator
-            size={ProgressIndicatorSize.THIN}
-            value={started ? position : 0}
-            maximumValue={duration || 1}
-            isActive={status === 'playing'}
-            announceUpdatesForAccessibility={false}
-            aria-label={t(isVoiceNote(message.content) ? 'audioLabel' : 'audioFileLabel', {duration: formatDuration(duration)})}
-          />
-          <TextView as="p" textStyle={TextStyle.META2} textColor={TextColor.SECONDARY}>
-            {status === 'error'
-              ? t('markerAudio')
-              : started
-                ? `${formatDuration(position)} / ${formatDuration(duration)}`
-                : formatDuration(duration)}
-          </TextView>
-        </div>
-      </div>
-      {transcript ? (
-        <TextView as="p" className="audio-transcript" textStyle={TextStyle.META1}>
-          {snippet(transcript, TRANSCRIPT_PREVIEW_LENGTH)}
-        </TextView>
-      ) : null}
-    </div>
-  );
 }
 
 export function MessageBubble({
