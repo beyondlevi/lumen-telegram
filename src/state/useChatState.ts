@@ -16,7 +16,8 @@ import {hostAudio, type LumenAudio, type LumenAudioResult} from '../audio/lumenA
 import {encodeWaveform} from '../telegram/waveform';
 import {createAvatarLoader} from './avatars';
 import {loadChatCache, saveChatCache} from './chatCache';
-import {createMediaLoader, type LoadedMedia} from './media';
+import {createMediaLoader, type LoadedMedia, type LoadedPhoto} from './media';
+import {createThumbnailLoader, messagePreview} from './photoThumbnails';
 import {photoThumbnail, photoToSend, type CapturedPhoto} from '../photo/capturedPhoto';
 import {failureReason} from '../failure';
 import {loadReadMarks, saveReadMarks, type ReadMarks} from './readMarks';
@@ -71,6 +72,12 @@ export type ChatState = {
   requestAvatar(chat: Chat | undefined): void;
   /** Downloads a photo or voice message on demand (kept in memory for the session). */
   loadMedia(message: ChatMessage): Promise<LoadedMedia>;
+  /** A photo in full, decoded at most 600 px; the caller releases it. */
+  loadPhoto(message: ChatMessage): Promise<LoadedPhoto>;
+  /** A photo's thumbnail (about 320 px) once downloaded, else the preview that came with it; null while there is neither. */
+  photoThumbnail(message: ChatMessage): string | null;
+  /** Downloads a photo's thumbnail (a bubble on screen asks). */
+  requestPhotoThumbnail(message: ChatMessage): void;
   /** Microphone and transcription: the host's, the simulated one in demo mode, or null (not available). */
   audio: LumenAudio | null;
   /** Sends a recorded voice note; `levels` (0..1 during the recording) become its waveform. */
@@ -170,6 +177,12 @@ export function useChatState(): ChatState {
   useEffect(() => () => avatars?.dispose(), [avatars]);
   const media = useMemo(() => (api == null ? null : createMediaLoader(api)), [api]);
   useEffect(() => () => media?.dispose(), [media]);
+  const [thumbnailVersion, setThumbnailVersion] = useState(0);
+  const thumbnails = useMemo(
+    () => (media == null ? null : createThumbnailLoader(media.thumbnail, () => setThumbnailVersion(version => version + 1))),
+    [media],
+  );
+  useEffect(() => () => thumbnails?.dispose(), [thumbnails]);
 
   const setOfflineState = useCallback((value: boolean) => {
     if (offlineRef.current === value) {
@@ -706,6 +719,20 @@ export function useChatState(): ChatState {
     [media],
   );
 
+  // Stable, so the bubbles are drawn again only when their own thumbnail changes.
+  const requestPhotoThumbnail = useCallback((message: ChatMessage) => thumbnails?.request(message), [thumbnails]);
+  const thumbnailOf = useCallback(
+    (message: ChatMessage) => thumbnails?.get(message) ?? messagePreview(message),
+    // thumbnailVersion: a thumbnail arrived.
+    [thumbnails, thumbnailVersion],
+  );
+
+  const loadPhoto = useCallback(
+    (message: ChatMessage) =>
+      media == null ? Promise.reject(new TelegramError('network', 'Not connected')) : media.loadPhoto(message),
+    [media],
+  );
+
   // Persist the list and recent messages for an instant start next time.
   useEffect(() => {
     if (account == null || phase.kind !== 'ready' || syncing || chats.length === 0) {
@@ -819,6 +846,9 @@ export function useChatState(): ChatState {
         }
       },
       loadMedia,
+      loadPhoto,
+      photoThumbnail: thumbnailOf,
+      requestPhotoThumbnail,
       audio,
       sendVoice,
       sendPhoto,
@@ -832,7 +862,7 @@ export function useChatState(): ChatState {
       contactName: chatId => contactNames.get(chatId) ?? null,
       resolveDialog,
     }),
-    // avatarVersion: a photo finished loading.
-    [allowed, audio, avatarVersion, avatars, chats, contactNames, demo, discardPhoto, isUnread, loadMedia, offline, openThread, phase, reloadConfig, resolveDialog, resolvedChats, retryPhoto, saveTranscript, searchTargets, sendPhoto, sendReaction, sendText, sendVoice, sentPhotos, syncing, threads, transcripts],
+    // avatarVersion: a photo finished loading; thumbnailVersion: a thumbnail did.
+    [allowed, audio, avatarVersion, thumbnailOf, requestPhotoThumbnail, loadPhoto, avatars, chats, contactNames, demo, discardPhoto, isUnread, loadMedia, offline, openThread, phase, reloadConfig, resolveDialog, resolvedChats, retryPhoto, saveTranscript, searchTargets, sendPhoto, sendReaction, sendText, sendVoice, sentPhotos, syncing, threads, transcripts],
   );
 }

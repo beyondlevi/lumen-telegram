@@ -1,9 +1,9 @@
 // One chat bubble; based on the UI Toolkit messaging example. Activating a
 // bubble opens its context menu (View for photos, Listen/Pause and Transcribe
 // for voice messages, the four reactions the chat accepts, Reply). Reactions
-// show as a badge under the bubble's bottom-right corner. A photo you sent
-// this session shows its thumbnail and its upload (sending, sent, not sent
-// with Try again).
+// show as a badge under the bubble's bottom-right corner. A photo shows its
+// thumbnail (see PhotoContent); one you sent this session shows the one made
+// here and its upload (sending, sent, not sent with Try again).
 
 import arrowBigReplyFilled from '@wearables-ui-toolkit/icons/svg/arrowbigreply__filled.svg';
 import circlePlayFilled from '@wearables-ui-toolkit/icons/svg/circleplay__filled.svg';
@@ -38,6 +38,7 @@ import {displayEmoji} from '../telegram/convert';
 import type {ChatMessage, ReactionSummary} from '../telegram/model';
 import type {ReactionOption} from '../telegram/reactions';
 import type {SentPhoto} from '../state/useChatState';
+import {PhotoContent} from './PhotoContent';
 import {PHOTO_STATE_KEYS, SentPhotoContent} from './SentPhotoContent';
 import {AudioContent, audioDescription} from './AudioContent';
 
@@ -63,6 +64,9 @@ type MessageBubbleProps = {
   transcript?: string | null;
   /** A photo sent this session: its thumbnail and upload. */
   sentPhoto?: SentPhoto | null;
+  /** A photo's thumbnail (or its preview), when there is one yet. */
+  thumbnail: string | null;
+  onNeedThumbnail: (message: ChatMessage) => void;
   onRetryPhoto: (message: ChatMessage) => void;
   onDiscardPhoto: (message: ChatMessage) => void;
 };
@@ -127,6 +131,8 @@ export function MessageBubble({
   sentPhoto,
   onRetryPhoto,
   onDiscardPhoto,
+  thumbnail,
+  onNeedThumbnail,
 }: MessageBubbleProps) {
   const isOutgoing = message.fromMe;
   const reactions = message.reactions;
@@ -305,6 +311,8 @@ export function MessageBubble({
             <div className="message-bubble-content">
               {sentPhoto ? (
                 <SentPhotoContent photo={sentPhoto} caption={message.content.text} alt={text} />
+              ) : isPhoto ? (
+                <PhotoContent message={message} thumbnail={thumbnail} alt={text} onNeedThumbnail={onNeedThumbnail} />
               ) : isAudio ? (
                 <AudioContent message={message} audio={audio} transcript={transcript} />
               ) : (

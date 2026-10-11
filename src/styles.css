@@ -230,6 +230,18 @@ body {
   z-index: -2;
 }
 
+/* A photo opened in full, drawn over its conversation (see PhotoView). */
+.photo-view-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--uit-color-background-window);
+}
+
+.photo-view-layer--closed {
+  z-index: -2;
+}
+
 .photo-send {
   align-items: center;
 }
@@ -256,23 +268,35 @@ body {
   overflow: hidden;
 }
 
-/* A photo you sent: its thumbnail, caption and upload state. */
+/* A photo in its bubble: its thumbnail, caption and, for one you sent, its upload. */
 .sent-photo {
   display: flex;
   flex-direction: column;
   gap: var(--uit-spacing-2xs);
 }
 
-.sent-photo-thumbnail {
-  display: block;
+.photo-box {
+  position: relative;
+  display: grid;
+  place-items: center;
   inline-size: 27vi;
   max-inline-size: 100%;
-  object-fit: cover;
+  overflow: hidden;
   border-radius: var(--uit-corner-radius-small);
+  background: var(--uit-color-background-inset);
 }
 
-.sent-photo-thumbnail--loading {
-  background: var(--uit-color-background-message-outbound);
+.photo-box-image {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.photo-box-icon {
+  position: absolute;
+  inline-size: var(--uit-listitem-status-icon-size);
+  block-size: var(--uit-listitem-status-icon-size);
 }
 
 .sent-photo-state {

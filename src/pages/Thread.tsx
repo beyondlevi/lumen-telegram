@@ -81,7 +81,7 @@ function focusNewestBubble(list: HTMLElement | null | undefined) {
 // gives it a new location object; with primitives for props, the conversation
 // is not drawn again on its way out (Back to the list).
 export const Thread = memo(function Thread({chatId, pathname, locationKey, composerOpen, navigate, onTakePhoto, photoButtonRef}: ThreadProps) {
-  const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor, contactName, sentPhoto, retryPhoto, discardPhoto} =
+  const {chatFor, thread, openThread, sendText, sendReaction, offline, avatarFor, requestAvatar, loadMedia, allowedReactions, audio: lumenAudio, transcriptFor, contactName, sentPhoto, retryPhoto, discardPhoto, photoThumbnail, requestPhotoThumbnail} =
     useChat();
   const chat = chatFor(chatId);
   // A contact found by voice search may have no conversation in the list yet.
@@ -326,6 +326,8 @@ export const Thread = memo(function Thread({chatId, pathname, locationKey, compo
                 transcript={message.content.kind === 'audio' ? transcriptFor(message.id) : null}
                 onToggleAudio={toggleAudio}
                 sentPhoto={photo}
+                thumbnail={message.content.kind === 'photo' && photo == null ? photoThumbnail(message) : null}
+                onNeedThumbnail={requestPhotoThumbnail}
                 onRetryPhoto={retryPhotoMessage}
                 onDiscardPhoto={discardPhotoMessage}
               />
