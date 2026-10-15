@@ -7,6 +7,8 @@
 //   recordError   'busy' | 'no-phone' | … : the next record() rejects with that code
 //   startDelayMs  number: record() resolves after that time (the phone confirming the microphone)
 //   stopDelayMs   number: stop() resolves after that time (encoding and transfer of the file)
+//   stopError     'timeout' | … : the next stop() rejects with that code ('timeout' is
+//                 retryable, as Lumen's: stop() again then gives the same recording)
 //   endAfterMs    number: the recording ends by itself ('max') after that time
 //   quietAfterMs  number: from that time the input level drops to silence (the wearer paused)
 //   transcribeError 'engine' | 'no-speech' | … : the next transcribe() rejects
@@ -18,7 +20,7 @@ export function fakeAudioScript(voiceUrl) {
   return `
     (() => {
       const voiceUrl = ${JSON.stringify(voiceUrl)};
-      const control = (window.__audioControl = {recordError: null, startDelayMs: 0, stopDelayMs: 0, endAfterMs: null, quietAfterMs: null, transcribeError: null,
+      const control = (window.__audioControl = {recordError: null, startDelayMs: 0, stopDelayMs: 0, endAfterMs: null, quietAfterMs: null, transcribeError: null, stopError: null,
         transcript: 'This is a fake transcript of the voice message.'});
       const log = (window.__audioLog = {records: [], stops: 0, cancels: 0, transcribes: 0, partials: 0});
       const failure = (code, message) => Object.assign(new Error(message || code), {code});
@@ -44,6 +46,12 @@ export function fakeAudioScript(voiceUrl) {
               log.stops += 1;
               done = true;
               clearInterval(timer);
+              if (control.stopError) {
+                const code = control.stopError;
+                control.stopError = null;
+                await delay(300);
+                throw Object.assign(failure(code), code === 'timeout' ? {retryable: true} : {});
+              }
               const audio = await result();
               await delay(control.stopDelayMs);
               return audio;

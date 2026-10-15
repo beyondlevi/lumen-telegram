@@ -17,7 +17,7 @@ import {
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Navigate, useNavigate, useParams} from 'react-router-dom';
 import {audioErrorMessage} from '../audio/audioErrors';
-import {meterLevel, RECORD_LIMIT_MS, type LumenRecording, type LumenAudioResult} from '../audio/lumenAudio';
+import {isRetryable, meterLevel, RECORD_LIMIT_MS, type LumenRecording, type LumenAudioResult} from '../audio/lumenAudio';
 import {failureReason} from '../failure';
 import {formatDuration} from '../format';
 import {t} from '../i18n/strings';
@@ -34,7 +34,8 @@ type RecordState =
   | {kind: 'limit'; result: LumenAudioResult}
   | {kind: 'finishing'; elapsedMs: number}
   | {kind: 'sending'; elapsedMs: number}
-  | {kind: 'error'; message: string};
+  /** `fetchAgain`: the voice note was recorded and the phone kept it; Try again asks for it, not a new one. */
+  | {kind: 'error'; message: string; fetchAgain?: {elapsedMs: number}};
 
 /** Records a voice note with the glasses' microphone (through the Lumen host) and sends it. */
 export function RecordPage() {
@@ -65,6 +66,8 @@ function Recorder({chatId}: {chatId: string}) {
   /** Input levels of this recording (about 5 per second), for the voice note's waveform. */
   const levelsRef = useRef<number[]>([]);
   const sendButtonRef = useRef<ButtonHandle>(null);
+  /** A recording was made and lost (its stop failed for good): the button records anew. */
+  const recordedRef = useRef(false);
 
   // Send has the initial focus on every opening (the route would otherwise
   // restore the focus of a previous visit, e.g. Discard).
@@ -83,6 +86,7 @@ function Recorder({chatId}: {chatId: string}) {
     mountedRef.current = true;
     finishedRef.current = false;
     resultRef.current = null;
+    recordedRef.current = false;
     levelsRef.current = [];
     setState({kind: 'starting'});
     const started = audio.record({maxMs: RECORD_LIMIT_MS});
@@ -127,10 +131,11 @@ function Recorder({chatId}: {chatId: string}) {
   }, [attempt, audio]);
 
   const send = useCallback(async () => {
-    if (state.kind !== 'recording' && state.kind !== 'limit') {
+    const again = state.kind === 'error' ? state.fetchAgain : undefined;
+    if (state.kind !== 'recording' && state.kind !== 'limit' && again == null) {
       return;
     }
-    const elapsedMs = state.kind === 'recording' ? state.elapsedMs : state.result.durationMs;
+    const elapsedMs = state.kind === 'recording' ? state.elapsedMs : state.kind === 'limit' ? state.result.durationMs : (again?.elapsedMs ?? 0);
     try {
       let result = resultRef.current;
       if (result == null) {
@@ -156,8 +161,14 @@ function Recorder({chatId}: {chatId: string}) {
         return;
       }
       if (resultRef.current == null) {
-        // Stopping failed: the recording is lost.
         finishedRef.current = false;
+        if (isRetryable(error)) {
+          // Recorded, but the trip from the phone failed: the phone keeps it for another stop().
+          setState({kind: 'error', message: t('voiceNotArrived'), fetchAgain: {elapsedMs}});
+          return;
+        }
+        // Stopping failed: the recording is lost.
+        recordedRef.current = true;
         setState({kind: 'error', message: audioErrorMessage(error)});
         return;
       }
@@ -175,7 +186,10 @@ function Recorder({chatId}: {chatId: string}) {
       ? state.elapsedMs
       : state.kind === 'limit'
         ? state.result.durationMs
-        : 0;
+        : state.kind === 'error' && state.fetchAgain
+          ? state.fetchAgain.elapsedMs
+          : 0;
+  const fetchAgain = state.kind === 'error' && state.fetchAgain != null;
   const status =
     state.kind === 'starting'
       ? t('recordingStarting')
@@ -200,7 +214,7 @@ function Recorder({chatId}: {chatId: string}) {
           <div className="content-inset record-panel" role="status">
             {state.kind === 'error' ? (
               <TextView as="p" textStyle={TextStyle.BODY2_EMPHASIZED}>
-                {t('recordingFailedTitle')}
+                {fetchAgain ? t('voiceNotArrivedTitle', {duration: formatDuration(elapsedMs / 1000)}) : t('recordingFailedTitle')}
               </TextView>
             ) : (
               <TextView as="p" textStyle={TextStyle.BODY2_EMPHASIZED}>
@@ -230,8 +244,8 @@ function Recorder({chatId}: {chatId: string}) {
             {/* One Button whose command follows the state, so focus stays put. */}
             <Button
               ref={sendButtonRef}
-              title={state.kind === 'error' ? t('retry') : t('sendVoiceAction')}
-              onClick={state.kind === 'error' ? retry : send}
+              title={state.kind === 'error' ? (fetchAgain || !recordedRef.current ? t('retry') : t('recordAgain')) : t('sendVoiceAction')}
+              onClick={state.kind === 'error' && !fetchAgain ? retry : send}
               disabled={sendDisabled}
             />
             <Button title={t('discardAction')} icon={trashFilled} onClick={discard} />

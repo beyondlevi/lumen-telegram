@@ -63,3 +63,8 @@ export function hostAudio(win: {lumen?: {audio?: unknown}} = window): LumenAudio
 export function audioErrorCode(error: unknown): string {
   return error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : '';
 }
+
+/** A stop() that failed only on the way back (`timeout`, `retryable`): stop() again asks for the same voice note. */
+export function isRetryable(error: unknown): boolean {
+  return error instanceof Error && (error as Error & {retryable?: boolean}).retryable === true && audioErrorCode(error) === 'timeout';
+}
