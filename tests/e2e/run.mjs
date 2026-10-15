@@ -882,6 +882,30 @@ async function voiceFlow(browser) {
     await page.waitForURL(`**/chat/${ANA}`);
     await page.waitForTimeout(500);
 
+    // A voice note that didn't arrive (the trip from the phone timed out): the screen says it was
+    // recorded, and Try again brings the same recording and sends it, without recording anew.
+    {
+      const sentBefore = (await voiceSent()).length;
+      const before = await audioLog();
+      await control({stopError: 'timeout'});
+      await press(page, 'Enter');
+      await page.waitForURL(/\/record$/);
+      await waitForText(page, '0:02', 4000);
+      await press(page, 'Enter');
+      await waitForText(page, "The voice note didn't arrive", 5000);
+      await waitForText(page, 'the phone still has it');
+      assert.equal(await activeLabel(page), 'div|Try again', 'Try again keeps the focus');
+      await page.screenshot({path: path.join(outDir, 'voice-9-not-arrived.png')});
+      await press(page, 'Enter');
+      await waitForText(page, 'Voice message sent', 5000);
+      await page.waitForURL(`**/chat/${ANA}`);
+      const after = await audioLog();
+      assert.equal(after.records.length, before.records.length + 1, 'Try again did not record anew');
+      assert.equal(after.stops, before.stops + 2, 'Try again asked for the same recording again');
+      assert.equal((await voiceSent()).length, sentBefore + 1, 'the recorded voice note was sent');
+      await page.waitForTimeout(500);
+    }
+
     // Transcribe Ana's voice note: partials, then the text; kept for the session
     await press(page, 'ArrowLeft');
     await pressUntil(page, 'ArrowUp', /Ana Souza: Voice message/, 12);
